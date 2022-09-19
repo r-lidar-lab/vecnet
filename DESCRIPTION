@@ -1,14 +1,19 @@
 Package: vecnet
-Type: Vectorization of road networks
-Title: Vectorization of road networks from rasters
+Type: Package
+Title: Vectorization of Road Networks From Rasters and Airborne Laser Scanning
 Version: 0.1.0
 Author: Jean-Romain Roussel
 Maintainer: Jean-Romain Roussel <jean-romain.roussel.1@ulaval.ca>
-Description: Functions to vectorize raster of roads. It works with binary and non binary raster, 
-  is robust to false positive, false negative and returns a topologically valid set of spatial lines
+Description: Functions to vectorize raster of roads. It works with binary and non binary raster, is robust to false positive, false negative and returns a topologically valid set of spatial lines.
 License: GPL-3
 Encoding: UTF-8
 Imports: 
+    Matrix,
+    data.table,
+    methods,
+    sp,
+    units,
+    zoo,
     terra,
     raster,
     lwgeom,
@@ -16,9 +21,11 @@ Imports:
     pracma,
     tidygraph,
     sf,
-    sfnetworks
+    sfnetworks,
+    ALSroads
 Suggests:
     viridis
+Remotes: Jean-Romain/ALSroads
 RoxygenNote: 7.2.0
 Depends: 
     R (>= 4.1.0)

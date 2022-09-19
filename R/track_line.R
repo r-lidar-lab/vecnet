@@ -1,26 +1,46 @@
-#' Drive along an unknown road
+#' Drive and vectorize an unknown road
 #'
-#' Drive along an unknown road in a conductivity raster starting from small piece
-#' of road segment pointing in the right direction.
+#' Drive along an unknown road in a probability map starting from small piece
+#' of road segment pointing in the right direction and vectorize it by returning a spatial
+#' line. This function is used by \link{vectorize_network} and is not intended to be used
+#' by regular users except for trial-and-error tests.
 #'
 #' @param seed  \code{sfc_LINESTRING} a seed to start driving a road
-#' @param conductivity  raster (\code{raster} format)
-#' @param fov  numeric. Field of view (degrees) ahead of the search vector.
+#' @param conductivity raster a conductivity raster (see references).
+#' @param network a \code{sf/sfc} with an already existing network such as the algorithm
+#' can stop when vectorizing an already vectorized part of the network.
+#' @param fov  numeric. Field of view (degrees) ahead of the search vector (see references)
 #' @param sightline  numeric (distance unit). Search distance used to find the next most probable
-#' point on the road.
+#' point on the road (see references).
+#' @param min_conductivity numeric between 0 and 1. corresponds to the sensitivity of the method. A
+#' value close to 1 indicates that the algorithm follows only the pixels with a very high
+#' road probabilities and stops easily and may miss roads. A low value indicates that the algorithm
+#' follows the pixel even with low conductivity and is likely to vectorize road that do not exist but
+#' is less likely to miss existing roads.
+#' @param ... Unused
+#' @param disp bool. Display in realtime the progress on images. For debugging purposes.
 #'
-#' @return list, \code{line} being the road found (as \code{sfc}) and \code{cost} a numeric vector
-#' of cost at each invidual vertices of the line.
+#' @return list, \code{road} contains the road found in a vectorial format (\code{sfc}) and \code{seed} (\code{sfc}) that
+#' contains all the potential intersection and seeds found along the road in a vectorial format (\code{sfc}).
+#'
+#' @references
+#' Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim
+#' (2022) Vectorial and topologically valid segmentation of forestry road networks from ALS data. In prep.\cr\cr
+#' Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim
+#' (2022) Correction, update, and enhancement of vectorial forestry road maps using ALS data, a
+#' pathfinder, and seven metrics. Journal of Applied Earth Observation and Geoinformation.
+#'
 #' @export
 #' @examples
+#' \dontrun{
 #' library(terra)
 #' library(sf)
 #'
 #' map <- system.file("extdata", "network.tif", package = "vecnet")
 #' seeds <- system.file("extdata", "seeds.shp", package = "vecnet")
-#' map = rast(map)
-#' seeds = st_read(seeds)
-#' seed = st_geometry(seeds)[1]
+#' map <- rast(map)
+#' seeds <- st_read(seeds, quiet = TRUE)
+#' seed <- st_geometry(seeds)[1]
 #'
 #' res <- track_line(seed, map, min_conductivity = 0.5)
 #'
@@ -28,14 +48,15 @@
 #' plot(seed, add = TRUE, col = "green", lwd = 3)
 #' plot(res$road, add = TRUE, col = "red", lwd = 2)
 #' plot(res$seeds, add = TRUE, col = "green", lwd = 3)
-track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline = 100, min_conductivity = 0.4, ..., disp = FALSE)
+#' }
+track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline = 100, min_conductivity = 0.6, ..., disp = FALSE)
 {
   t0 <- Sys.time()
 
-  if (is(seed, "sf")) seed = sf::st_geometry(seed)
-  if (!is(seed, "sfc_LINESTRING")) stop("seed must be sfc_LINESTRING")
+  if (methods::is(seed, "sf")) seed = sf::st_geometry(seed)
+  if (!methods::is(seed, "sfc_LINESTRING")) stop("seed must be sfc_LINESTRING")
   if (length(seed) != 1L) stop("seed must be of length 1")
-  if (!is(conductivity, "SpatRaster")) stop("conductivity must be a SpatRaster")
+  if (!methods::is(conductivity, "SpatRaster")) stop("conductivity must be a SpatRaster")
 
   if (!is.null(network)) network = sf::st_geometry(network)
 
@@ -92,7 +113,7 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
       dist = (k-1)*sightline*0.8
       cat(dist, " m (", get_speed(dist, t0), " km/h)\r", sep = "")
     }
-    flush.console()
+    utils::flush.console()
 
     # Compute heading from the two previous points
     p1 <- list_coords[[k-1]]
@@ -182,6 +203,15 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
 
     if (any(ans$cost >= 9999))
     {
+      tmp_angles_rad <- generate_angles(resolution, sightline/4, min(fov, 90))
+      ends <- generate_ends(p2, tmp_angles_rad, sightline/4, heading)
+      ends$angle <- tmp_angles_rad
+      ans <- find_reachable(start, ends, trans, cost_max/4)
+    }
+
+
+    if (any(ans$cost >= 9999))
+    {
       message("Driving stopped because it reached another road")
       cost_max = -Inf
       break
@@ -265,17 +295,29 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
 
     if (disp)
     {
+
       if (length(angles_rad) == length(cost))
       {
-        plot(angles_rad, cost, type = "l", ylim = c(sightline, max(cost) *1.1), col = "green", log = "y")
-        lines(angles_rad, ma(cost, n = 7), col = "darkgreen")
-        abline(v = angles_rad[c(idx_main, idx_other)], col = "darkgreen",lwd = 3)
-
-        abline(h = cost_max, lty = 3)
-        abline(h = 1.5*cost_max, lty = 3)
-        abline(v = angles_rad[idx_main] + c(-0.2612, 0.2612), lty = 3)
+        #svglite::svglite("/home/jr/Documents/Ulaval/2022 Post-doc/Articles/vectnet/img/svg/followroadcostprofile.svg", height = 8, width = 8)
+        graphics::par(family = "serif")
+        plot(angles_rad*180/pi, cost, type = "l", lwd = 2, ylim = c(sightline, max(cost) *1.1), col = "red", xlab = "Angle (\u00B0)", ylab = "Cost (1)")
+        smooth <- 9
+        scost = ma(cost, n = smooth)
+        scost = ma(scost, n = 5)
+        graphics::lines(angles_rad*180/pi, scost, col = "darkgreen", lwd = 2)
+        graphics::abline(v = angles_rad[c(idx_main, idx_other)]*180/pi, col = "black",lwd = 2)
+        graphics::abline(h = cost_max, lty = 3)
+        graphics::abline(h = 2.5*cost_max, lty = 3)
+        graphics::legend(80, 990, legend=c("Cost profile", "Smoothed profile"),
+               col=c("red", "darkgreen"), lty=1:2, cex=0.8)
+        #abline(v = angles_rad[idx_main]*180/pi + c(-0.2612, 0.2612)*180/pi, lty = 3)
+        #dev.off()
       }
-      terra::plot(terra::crop(sub_aoi_conductivity, terra::ext(aoi) + 80), col = viridis::inferno(50), main = paste0(k,"/", n), range = c(0,1))
+      terra::plot(terra::crop(sub_aoi_conductivity, terra::ext(aoi) + 80),
+                  col = viridis::inferno(50),
+                  main = paste0(k,"/", n),
+                  range = c(0,1),
+                  axes = FALSE)
       terra::plot(aoi, add = T, col = viridis::inferno(50))
       plot(terra::ext(aoi), add = T)
       ends$cost = cost
@@ -301,6 +343,9 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
       cat("cost =", current_cost, "\n")
       cat("overcost =", overcost, "\n")
       cat("dovercost =", dovercost, "\n")
+
+      In = I
+      #tm = paper_figure()
     }
   }
 
@@ -312,27 +357,29 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
     sf::st_set_crs(sf::st_crs(seed))
 
 
-  if (!is.null(network) && length(network) > 1)
+  if (!is.null(network) && length(network) >= 1)
   {
     tail_point = lwgeom::st_endpoint(newline)
     distance_to_network = min(sf::st_distance(network, tail_point))
     if (as.numeric(distance_to_network) < 75)
     {
       u = sf::st_simplify(newline, dTolerance = 2)
+      u = lwgeom::st_linesubstring(u, 0.5, 1)
 
       #plot(u, xlim = st_bbox(u)[c(1, 3)] + c(-20,20),  ylim = st_bbox(u)[c(2, 4)] + c(-20,20))
       #plot(network, add = T)
-      u = st_extend_line(u, 75, end = "TAIL" )
+      u = st_extend_line(u, 80, end = "TAIL" )
       #plot(u, xlim = st_bbox(u)[c(1, 3)] + c(-20,20),  ylim = st_bbox(u)[c(2, 4)] + c(-20,20))
       #plot(network, add = T)
       p = sf::st_intersection(u, network)
-      if (length(p) == 1 && st_geometry_type(p) == "POINT")
+      if (length(p) == 1 && sf::st_geometry_type(p) == "POINT")
       {
         M = rbind(sf::st_coordinates(newline)[,1:2], sf::st_coordinates(p)[,1:2])
         newline = sf::st_linestring(M) |> sf::st_sfc() |> sf::st_set_crs(sf::st_crs(seed))
+        cat("End of the road connected to the existing network.\n")
       }
 
-      #plot(newline)
+      #plot(newline, add = T, col = "red", lwd = 2)
       #plot(network, add = T)
     }
   }
@@ -356,6 +403,7 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
   len = as.numeric(sf::st_length(newline))
   dintersection = nintersection/(len/1000)
 
+  h <- km <- NULL
   tf <- Sys.time()
   dt <- tf-t0
   dt <- round(units::as_units(dt),1)
@@ -449,7 +497,7 @@ find_reachable <- function(start, ends, trans, cost_max)
   scost = -ma(cost, n = smooth)
   scost = ma(scost, n = 5)
   offset = floor(smooth/2) + floor(5/2)
-  scost = as.numeric(na.omit(scost))
+  scost = as.numeric(stats::na.omit(scost))
   minima = pracma::findpeaks(scost, zero = "+")
 
   if (is.null(minima)) return(NULL)
@@ -523,7 +571,7 @@ mask_existing_network <- function(x, network)
 
 mask_passage <- function(raster, lines, start_cut, end_cut, crs)
 {
-  len =as.numeric(st_length(lines))
+  len = as.numeric(sf::st_length(lines))
   from = 1 - (len-start_cut)/len
   to = (len-end_cut)/len
   if (length(from) > 1)
@@ -531,7 +579,7 @@ mask_passage <- function(raster, lines, start_cut, end_cut, crs)
     from = mean(from)
     to = mean(to)
   }
-  if (is(lines, "sfg")) lines <- sf::st_sfc(lines)
+  if (methods::is(lines, "sfg")) lines <- sf::st_sfc(lines)
   mask <- lwgeom::st_linesubstring(lines, from, to)
   mask <- sf::st_buffer(mask, dist = 5, endCapStyle = "FLAT")
   mask <- sf::st_set_crs(mask, crs)
@@ -541,6 +589,7 @@ mask_passage <- function(raster, lines, start_cut, end_cut, crs)
 
 get_speed = function(dist, t0)
 {
+  h <- m <- km <- NULL
   tf <- Sys.time()
   dt <- tf-t0
   dt <- round(units::as_units(dt),1)
@@ -553,3 +602,39 @@ get_speed = function(dist, t0)
   speed = round(speed, 0)
   return(speed)
 }
+
+# paper_figure = function()
+# {
+#   library(tmap)
+#   crs = st_crs(sub_aoi_conductivity)
+#   A = ends["cost"] |> st_set_crs(crs)
+#   P = gdistance::shortestPath(trans, sf::st_coordinates(start), sf::st_coordinates(ends), output = "SpatialLines") |> suppressWarnings()
+#   P = sf::st_as_sf(P)|> st_set_crs(crs)
+#   P$cost = ends$cost
+#   a = st_sfc(p1) |> st_set_crs(crs)
+#   b = st_sfc(p2) |> st_set_crs(crs)
+#   L = L |> st_set_crs(crs)
+#   end = end |> st_set_crs(crs)
+#
+#   tm = tm_shape(terra::crop(sub_aoi_conductivity, terra::ext(aoi) + 80)) +
+#     tm_raster(palette = viridis::inferno(25), n = 15, style = "cont", title = "Probability",  breaks = c(0,0.25,0.5,0.75,1)) +
+#     tm_shape(aoi) +
+#     tm_raster(palette = viridis::inferno(25), n = 15, style = "cont", legend.show = F) +
+#     tm_shape(A) + tm_dots("cost", pal = viridis::viridis(25), size = 0.05, style = "cont") +
+#     tm_shape(P) + tm_lines("cost", pal = viridis::viridis(25), legend.col.show = FALSE) +
+#     #tm_shape(a) + tm_dots(col = "red", shape = 19, size = 1) +
+#     tm_shape(b) + tm_dots(col = "red", shape = 19, size = 1) +
+#     tm_shape(L) + tm_lines(col = "red", lwd = 5) +
+#     tm_shape(end) + tm_dots(col = "green", size = 1, shape = 17) +
+#     tm_layout(legend.bg.color = "white", fontfamily = "serif") +
+#     tm_add_legend("line", label = c("Road found", "Intersection found"), col = c("red", "blue"), lwd = 5) +
+#     tm_scale_bar(text.color = "white", text.size = 1, breaks = c(0,0.1), width = 0.1)
+#
+#   if (!is.null(In))
+#   {
+#     In = In |> st_set_crs(crs)
+#     tm = tm + tm_shape(In) + tm_lines(col = "blue", lwd = 4)
+#   }
+#
+#   tm
+# }

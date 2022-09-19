@@ -2,3 +2,4 @@
 
 export(track_line)
 export(vectorize_network)
+importClassesFrom(gdistance,TransitionLayer)

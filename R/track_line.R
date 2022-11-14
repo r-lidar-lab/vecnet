@@ -175,6 +175,7 @@ track_line <- function(seed,
       line <- sf::st_set_crs(line, sf::st_crs(seed))
 
       sub_aoi_conductivity <- query_conductivity_aoi(conductivity, line, smooth = T)
+      sub_aoi_conductivity[sub_aoi_conductivity < th_conductivity] = th_conductivity
       n = n+1
       #terra::plot(conductivity, col = viridis::inferno(50))
       #terra::plot(terra::ext(sub_aoi_conductivity), col = "red", add = T)
@@ -354,9 +355,10 @@ track_line <- function(seed,
       if(!is.null(I)) plot(I, add = T, col = "blue", lwd = 3)
       #if(!is.null(I2)) plot(I2, add = T, col = "cornflowerblue", lwd = 3)
       plot(end, add = T, col = "green", pch = 19, cex = 2)
-      cat("cost =", current_cost, "\n")
-      cat("overcost =", overcost, "\n")
-      cat("dovercost =", dovercost, "\n")
+      cat("step = ", k-1, "=====\n")
+      cat("cost =", current_cost, " | ")
+      cat("overcost =", overcost, " | ")
+      cat("dovercost =", dovercost, "\n\n")
 
       In = I
       #tm = paper_figure()

@@ -8,15 +8,24 @@
 #' @param seed  \code{sfc_LINESTRING} a seed to start driving a road
 #' @param conductivity raster a conductivity raster (see references).
 #' @param network a \code{sf/sfc} with an already existing network such as the algorithm
-#' can stop when vectorizing an already vectorized part of the network.
-#' @param fov  numeric. Field of view (degrees) ahead of the search vector (see references)
+#' can stop when vectorizing an already vectorized part of the network. Not mandatory. It is used
+#' automatically by \link{vectorize_network}.
+#' @param fov  numeric. Field of view (degrees) ahead of the search vector (see references).
 #' @param sightline  numeric (distance unit). Search distance used to find the next most probable
 #' point on the road (see references).
-#' @param min_conductivity numeric between 0 and 1. corresponds to the sensitivity of the method. A
+#' @param min_conductivity numeric between 0 and 1. Corresponds to the sensitivity of the method. A
 #' value close to 1 indicates that the algorithm follows only the pixels with a very high
-#' road probabilities and stops easily and may miss roads. A low value indicates that the algorithm
-#' follows the pixel even with low conductivity and is likely to vectorize road that do not exist but
-#' is less likely to miss existing roads.
+#' conductivity and stops easily when the average conductivity is lower than this value. With an high
+#' value the algorithm may miss roads. A low value indicates that the algorithm follows the pixel even
+#' with low conductivity and is likely to vectorize road that do not exist but is less likely to miss
+#' existing roads.
+#' @param th_conductivity numeric between 0 and 1. A conductivity map with too low values is not allowed
+#' (see reference). All the valuee lower than this value are clamped and replaced by this value.
+#' @param partial_gap_size numeric. The algorithm can drive on low conductivity segments even if the
+#' conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
+#' high conductivity road is reach after the gap (see references). The allowed distance is a multiple
+#' of the sightline. Default is 2.5 which roughly means that it can follow a too low conductivity
+#' track for two iterations and at the third one it must be back on a high conductivity track.
 #' @param ... Unused
 #' @param disp bool. Display in realtime the progress on images. For debugging purposes.
 #'
@@ -49,7 +58,16 @@
 #' plot(res$road, add = TRUE, col = "red", lwd = 2)
 #' plot(res$seeds, add = TRUE, col = "green", lwd = 3)
 #' }
-track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline = 100, min_conductivity = 0.6, ..., disp = FALSE)
+track_line <- function(seed,
+                       conductivity,
+                       network = NULL,
+                       fov = 160,
+                       sightline = 100,
+                       min_conductivity = 0.6,
+                       th_conductivity = 0.1,
+                       partial_gap_size = 2.5,
+                       ...,
+                       disp = FALSE)
 {
   t0 <- Sys.time()
 
@@ -80,12 +98,13 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
   n <- length(start_pts)
   start <- start_pts[n-1][[1]]
   end <- start_pts[n][[1]]
-  list_coords <- list(start, end)
+  #list_coords <- list(start, end)
   list_lines <- list(sf::st_geometry(seed)[[1]])
   list_intersections <- list()
   heading <- get_heading(start, end)
 
   sub_aoi_conductivity <- query_conductivity_aoi(conductivity, seed, smooth = T)
+  sub_aoi_conductivity[sub_aoi_conductivity < th_conductivity] = th_conductivity
 
   #plot(conductivity, col = viridis::inferno(50))
   #plot(terra::ext(sub_aoi_conductivity), col = "red", add = T, alpha = 0.3)
@@ -106,7 +125,7 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
   novercost = 0
   dovercost = 0
 
-  while (dovercost <= 250 & !is.infinite(cost_max))
+  while (dovercost <= partial_gap_size*sightline & !is.infinite(cost_max))
   {
     if (k %% 5 == 0)
     {
@@ -115,9 +134,11 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
     }
     utils::flush.console()
 
-    # Compute heading from the two previous points
-    p1 <- list_coords[[k-1]]
-    p2 <- list_coords[[k]]
+    # Compute heading from the previous segment
+    l <- list_lines[[k-1]]
+    l <- lwgeom::st_linesubstring(l, 0.5, 1)
+    p1 <- lwgeom::st_startpoint(l)[[1]]
+    p2 <- lwgeom::st_endpoint(l)[[1]]
     heading <- get_heading(p1, p2)
 
     # Create all possible ends ahead of the previous points
@@ -155,8 +176,8 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
 
       sub_aoi_conductivity <- query_conductivity_aoi(conductivity, line, smooth = T)
       n = n+1
-      #plot(conductivity, col = viridis::inferno(50))
-      #plot(raster::extent(sub_aoi_conductivity), col = "red", add = T)
+      #terra::plot(conductivity, col = viridis::inferno(50))
+      #terra::plot(terra::ext(sub_aoi_conductivity), col = "red", add = T)
       #plot(seed, add = T, lwd = 3, col = "red")
 
       sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network)
@@ -191,24 +212,17 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
     # other possible directions (i.e. intersections)
     ans <- find_reachable(start, ends, trans, cost_max)
 
-    # The only way to get infinity values is to reach an existing road
+    # The only way to get infinite values is to reach an existing road
     # We need to reduce the sightline to reduce down the approach speed
-    if (any(ans$cost >= 9999))
+    j = 0
+    while (any(ans$cost >= 9999) & sightline/(2^j) > 25)
     {
-      tmp_angles_rad <- generate_angles(resolution, sightline/2, min(fov, 90))
-      ends <- generate_ends(p2, tmp_angles_rad, sightline/2, heading)
+      j = j+1
+      tmp_angles_rad <- generate_angles(resolution, sightline/(2^j), min(fov, 90))
+      ends <- generate_ends(p2, tmp_angles_rad, sightline/(2^j), heading)
       ends$angle <- tmp_angles_rad
-      ans <- find_reachable(start, ends, trans, cost_max/2)
+      ans <- find_reachable(start, ends, trans, cost_max/(2^j))
     }
-
-    if (any(ans$cost >= 9999))
-    {
-      tmp_angles_rad <- generate_angles(resolution, sightline/4, min(fov, 90))
-      ends <- generate_ends(p2, tmp_angles_rad, sightline/4, heading)
-      ends$angle <- tmp_angles_rad
-      ans <- find_reachable(start, ends, trans, cost_max/4)
-    }
-
 
     if (any(ans$cost >= 9999))
     {
@@ -246,8 +260,8 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
     L <- sf::st_sfc(sf::st_linestring(C))
     end <- lwgeom::st_endpoint(L)
 
-    list_coords[[k+1]] <- sf::st_geometry(end)[[1]]
-    list_lines[[k]] <- L[[1]][-1,]
+    #list_coords[[k+1]] <- sf::st_geometry(end)[[1]]
+    list_lines[[k]] <- L[[1]]
     trace <- st_join_linestring(trace, L)
 
     # Protect against infinite loops
@@ -319,7 +333,7 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
                   range = c(0,1),
                   axes = FALSE)
       terra::plot(aoi, add = T, col = viridis::inferno(50))
-      plot(terra::ext(aoi), add = T)
+      terra::plot(terra::ext(aoi), add = T)
       ends$cost = cost
       tryCatch({
         plot(ends["cost"], pal = viridis::viridis, pch = 19, add = T, cex = 0.25, breaks = "quantile")
@@ -349,7 +363,10 @@ track_line <- function(seed, conductivity, network = NULL, fov = 160, sightline 
     }
   }
 
-  list_lines = list_lines[1:(length(list_lines)-novercost)]
+  list_lines <- list_lines[1:(length(list_lines)-novercost)]
+  first = list_lines[[1]]
+  list_lines <- lapply(list_lines, function(x) { x <- x[] ; return(x[-1,])})
+  list_lines[[1]] = first
 
   newline <- do.call(rbind, list_lines) |>
     sf::st_linestring() |>
@@ -583,7 +600,7 @@ mask_passage <- function(raster, lines, start_cut, end_cut, crs)
   mask <- lwgeom::st_linesubstring(lines, from, to)
   mask <- sf::st_buffer(mask, dist = 5, endCapStyle = "FLAT")
   mask <- sf::st_set_crs(mask, crs)
-  raster <- terra::mask(raster, terra::vect(mask), inverse = TRUE, updatevalue = 0)
+  raster <- terra::mask(raster, terra::vect(mask), inverse = TRUE, updatevalue = 0.05)
   return(raster)
 }
 

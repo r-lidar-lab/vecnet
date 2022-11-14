@@ -84,6 +84,8 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 2.6, mi
            "#00FF66", "#00FFCC", "#00CCFF", "#0066FF", "#0000FF", "#6600FF",
            "#CC00FF", "#FF00CC", "#FF0066") #rainbow(15)
 
+  seeds = sf::st_geometry(seeds)
+
   if (display)
     terra::plot(map, col = viridis::inferno(25), smooth = TRUE)
 

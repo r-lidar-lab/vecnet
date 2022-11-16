@@ -1,3 +1,5 @@
+![Lifecycle:Experimental](https://img.shields.io/badge/Lifecycle-Experimental-339999)
+
 # Vecnet
 
 Vecnet provides tools to vectorize a road network either from a binary map or a probability map derived from machine learning or any other method.  The algorithm is expected to be robust to gaps (false negative) and false positive. This package is experimental and must be considered as a proof of concept. It contains the implementation of the algorithm described in:

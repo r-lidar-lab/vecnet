@@ -66,3 +66,66 @@ st_extend_line <- function(line, distance, end = "BOTH")
 
   return(newline)
 }
+
+#' @examples
+#' f <- system.file("extdata", "sinuosity", package="vectnet")
+#' m = sf::st_read(f)
+#' m = sf::st_transform(m, 27572)
+sinuosity <- function(x)
+{
+  lines <- x
+  n <- length(lines)
+  S <- numeric(n)
+  for (i in 1:n)
+  {
+    line <- lines[i]
+
+    if (sf::st_geometry_type(line) != "LINESTRING")
+      stop(paste0("Geometry ", i, " is not a LINESTRING"))
+
+    spline <- adjust_spline(line)
+    S[i] = sf::st_length(line)/sf::st_length(spline)
+  }
+
+  round(S,2)
+}
+
+adjust_spline = function(points)
+{
+  # Adjust a spline to create a smooth line from points
+  xroad <- sf::st_coordinates(points)[,1]
+  yroad <- sf::st_coordinates(points)[,2]
+
+  if (length(xroad) <= 4)
+    return(points)
+
+  n = length(xroad)
+  troad <- cumsum(c(0,sqrt((xroad[-1]-xroad[-n])^2 + (yroad[-1]-yroad[-n])^2)))
+
+  ux <- stats::smooth.spline(troad, xroad, spar = 0.5, all.knots = TRUE)
+  uy <- stats::smooth.spline(troad, yroad, spar = 0.5, all.knots = TRUE)
+
+  # Sometime one point is missing in the spline for an unknown reason. If the output
+  # does not have the same length than the input we resize the input to fit the output
+  # and prevent failures
+  rm <- FALSE
+  if (length(ux$x) < length(troad))
+  {
+    rm <- troad %in% ux$x
+    xroad = xroad[rm]
+    yroad = yroad[rm]
+    troad = troad[rm]
+  }
+
+  # Maybe it is possible to have an extra point. This case is handled here but never observed
+  if (length(ux$x) > length(troad))
+  {
+    print(dput(points))
+    stop("Different length")
+  }
+
+  spline = cbind(ux$y, uy$y)
+  spline = sf::st_sfc(sf::st_linestring(spline))
+
+  return(spline)
+}

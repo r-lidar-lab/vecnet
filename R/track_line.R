@@ -69,6 +69,7 @@ track_line <- function(seed,
                        ...,
                        disp = FALSE)
 {
+  #' network = NULL ; fov = 160 ; sightline = 100 ; min_conductivity = 0.6 ; th_conductivity = 0.1 ; partial_gap_size = 2.5 ;
   t0 <- Sys.time()
 
   if (methods::is(seed, "sf")) seed = sf::st_geometry(seed)

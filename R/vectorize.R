@@ -77,7 +77,7 @@
 #' plot(ends, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' }
 #' @export
-vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 2.6, min_length = 400, verbose = FALSE, display = FALSE, ...)
+vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, min_length = 400, verbose = FALSE, display = FALSE, ...)
 {
   level <- 1
   col <- c("#FF0000", "#FF6600", "#FFCC00", "#CCFF00", "#66FF00", "#00FF00",
@@ -115,7 +115,7 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 2.6, mi
       })
 
       len <- as.numeric(sf::st_length(res$road))
-      sin <- ALSroads:::sinuosity.sfc_LINESTRING(res$road)
+      sin <- sinuosity(res$road)
       den <- res$dintersection
 
       if (len > min_length & sin <= max_sinuosity)

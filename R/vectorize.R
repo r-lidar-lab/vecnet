@@ -162,11 +162,11 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
   network <- sfnetworks::as_sfnetwork(network)
   #plot(network)
 
-  network <- tidygraph::convert(network, sfnetworks::to_spatial_smooth)
+  network <- tidygraph::convert(network, sfnetworks::to_spatial_subdivision)
   #plot(sf::st_geometry(network, "edges"), add = F, col = sample(rainbow(length(sf::st_geometry(network, "edges")))), lwd = 2)
   #plot(sf::st_geometry(network, "nodes"), add = TRUE, col = "black", pch = 19, cex = 0.5)
 
-  network <- tidygraph::convert(network, sfnetworks::to_spatial_subdivision)
+  network <- tidygraph::convert(network, sfnetworks::to_spatial_smooth)
   #plot(sf::st_geometry(network, "edges"), add = F, col = sample(rainbow(length(sf::st_geometry(network, "edges")))), lwd = 2)
   #plot(sf::st_geometry(network, "nodes"), add = TRUE, col = "black", pch = 19, cex = 0.5)
 

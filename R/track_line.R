@@ -199,7 +199,7 @@ track_line <- function(seed,
       val <- terra::extract(sub_aoi_conductivity, sf::st_coordinates(ends))[[1]]
       if (any(is.na(val)))
       {
-        warning("Drive stopped early. Edge of conductivity raster has been reached.", call. = FALSE)
+        message("Drive stopped early. Edge of conductivity raster has been reached.")
         cost_max <- -Inf
         break
       }

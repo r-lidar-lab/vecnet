@@ -115,8 +115,19 @@ track_line <- function(seed,
   # Mask the existing road to avoid driving a known road
   dots = list(...)
   mask_value = 0
-  if (!is.null(dots$find_seed_mode)) mask_value = 2
-  sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value)
+  buffer = 10
+  find_seek_mask = NULL
+  if (!is.null(dots$find_seed_mode))
+  {
+    mask_value = 2
+    buffer = 2
+    find_seek_mask = terra::vect(dots$find_seed_mode)
+  }
+
+  sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value, buffer)
+
+  if (!is.null(find_seek_mask))
+    sub_aoi_conductivity = terra::mask(sub_aoi_conductivity, find_seek_mask, inverse = TRUE, updatevalue = th_conductivity)
 
   # Init view angles as a function of the resolution of the raster and the sightline
   angles_rad <- generate_angles(resolution, sightline, fov)
@@ -185,8 +196,11 @@ track_line <- function(seed,
       #terra::plot(terra::ext(sub_aoi_conductivity), col = "red", add = T)
       #plot(seed, add = T, lwd = 3, col = "red")
 
-      sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network)
+      sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value, buffer)
       sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, trace, 0, 5, sf::st_crs(seed))
+
+      if (!is.null(find_seek_mask))
+        sub_aoi_conductivity = terra::mask(sub_aoi_conductivity, find_seek_mask, inverse = TRUE, updatevalue = th_conductivity)
 
       # Check again if some ends fall outside of the newly cropped conductivity raster
       # If yes we are close to the edge of the raster. Try again with half the sightline
@@ -575,7 +589,7 @@ find_reachable <- function(start, ends, trans, cost_max)
   return(list(minima = minima, cost = cost))
 }
 
-mask_existing_network <- function(x, network, updatevalue = 0)
+mask_existing_network <- function(x, network, updatevalue = 0, buffer = 10)
 {
   if (!is.null(network) && length(network) > 0)
   {
@@ -584,7 +598,7 @@ mask_existing_network <- function(x, network, updatevalue = 0)
     mask <- sf::st_crop(network, bb)
     if (length(mask) > 0)
     {
-      mask <- sf::st_buffer(mask, dist = 10)
+      mask <- sf::st_buffer(mask, dist = buffer)
       x <- terra::mask(x, terra::vect(mask), inverse = TRUE, updatevalue = updatevalue)
     }
   }

@@ -5,6 +5,7 @@
 #' false positive (see references).
 #'
 #' @param seeds  \code{sfc} a set of seeds to start driving the network (see references and examples).
+#' Can be found with \link{init_seeds}.
 #' @param map raster a probability raster.  Either a binary map or a propability map the
 #' former being a special case of the later (see references).
 #' @param network a \code{sf/sfc} with an already existing network such as the algorithm

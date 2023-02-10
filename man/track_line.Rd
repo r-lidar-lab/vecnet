@@ -11,6 +11,8 @@ track_line(
   fov = 160,
   sightline = 100,
   min_conductivity = 0.6,
+  th_conductivity = 0.1,
+  partial_gap_size = 2.5,
   ...,
   disp = FALSE
 )
@@ -21,18 +23,29 @@ track_line(
 \item{conductivity}{raster a conductivity raster (see references).}
 
 \item{network}{a \code{sf/sfc} with an already existing network such as the algorithm
-can stop when vectorizing an already vectorized part of the network.}
+can stop when vectorizing an already vectorized part of the network. Not mandatory. It is used
+automatically by \link{vectorize_network}.}
 
-\item{fov}{numeric. Field of view (degrees) ahead of the search vector (see references)}
+\item{fov}{numeric. Field of view (degrees) ahead of the search vector (see references).}
 
 \item{sightline}{numeric (distance unit). Search distance used to find the next most probable
 point on the road (see references).}
 
-\item{min_conductivity}{numeric between 0 and 1. corresponds to the sensitivity of the method. A
+\item{min_conductivity}{numeric between 0 and 1. Corresponds to the sensitivity of the method. A
 value close to 1 indicates that the algorithm follows only the pixels with a very high
-road probabilities and stops easily and may miss roads. A low value indicates that the algorithm
-follows the pixel even with low conductivity and is likely to vectorize road that do not exist but
-is less likely to miss existing roads.}
+conductivity and stops easily when the average conductivity is lower than this value. With an high
+value the algorithm may miss roads. A low value indicates that the algorithm follows the pixel even
+with low conductivity and is likely to vectorize road that do not exist but is less likely to miss
+existing roads.}
+
+\item{th_conductivity}{numeric between 0 and 1. A conductivity map with too low values is not allowed
+(see reference). All the valuee lower than this value are clamped and replaced by this value.}
+
+\item{partial_gap_size}{numeric. The algorithm can drive on low conductivity segments even if the
+conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
+high conductivity road is reach after the gap (see references). The allowed distance is a multiple
+of the sightline. Default is 2.5 which roughly means that it can follow a too low conductivity
+track for two iterations and at the third one it must be back on a high conductivity track.}
 
 \item{...}{Unused}
 
@@ -66,6 +79,7 @@ plot(seed, add = TRUE, col = "green", lwd = 3)
 plot(res$road, add = TRUE, col = "red", lwd = 2)
 plot(res$seeds, add = TRUE, col = "green", lwd = 3)
 }
+network = NULL ; fov = 160 ; sightline = 100 ; min_conductivity = 0.6 ; th_conductivity = 0.1 ; partial_gap_size = 2.5 ;
 }
 \references{
 Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim

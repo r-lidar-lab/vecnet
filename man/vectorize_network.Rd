@@ -8,7 +8,7 @@ vectorize_network(
   map,
   seeds,
   network = NULL,
-  max_sinuosity = 2.6,
+  max_sinuosity = 1.8,
   min_length = 400,
   verbose = FALSE,
   display = FALSE,
@@ -19,7 +19,8 @@ vectorize_network(
 \item{map}{raster a probability raster.  Either a binary map or a propability map the
 former being a special case of the later (see references).}
 
-\item{seeds}{\code{sfc} a set of seeds to start driving the network (see references and examples).}
+\item{seeds}{\code{sfc} a set of seeds to start driving the network (see references and examples).
+Can be found with \link{init_seeds}.}
 
 \item{network}{a \code{sf/sfc} with an already existing network such as the algorithm
 can stop when vectorizing an already vectorized part of the network.}

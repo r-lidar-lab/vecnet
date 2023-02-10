@@ -113,7 +113,10 @@ track_line <- function(seed,
   #plot(sub_aoi_conductivity, col = viridis::inferno(50))
 
   # Mask the existing road to avoid driving a known road
-  sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network)
+  dots = list(...)
+  mask_value = 0
+  if (!is.null(dots$find_seed_mode)) mask_value = 2
+  sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value)
 
   # Init view angles as a function of the resolution of the raster and the sightline
   angles_rad <- generate_angles(resolution, sightline, fov)
@@ -572,7 +575,7 @@ find_reachable <- function(start, ends, trans, cost_max)
   return(list(minima = minima, cost = cost))
 }
 
-mask_existing_network <- function(x, network)
+mask_existing_network <- function(x, network, updatevalue = 0)
 {
   if (!is.null(network) && length(network) > 0)
   {
@@ -582,7 +585,7 @@ mask_existing_network <- function(x, network)
     if (length(mask) > 0)
     {
       mask <- sf::st_buffer(mask, dist = 10)
-      x <- terra::mask(x, terra::vect(mask), inverse = TRUE, updatevalue = 0)
+      x <- terra::mask(x, terra::vect(mask), inverse = TRUE, updatevalue = updatevalue)
     }
   }
 
@@ -601,7 +604,7 @@ mask_passage <- function(raster, lines, start_cut, end_cut, crs)
   }
   if (methods::is(lines, "sfg")) lines <- sf::st_sfc(lines)
   mask <- lwgeom::st_linesubstring(lines, from, to)
-  mask <- sf::st_buffer(mask, dist = 5, endCapStyle = "FLAT")
+  mask <- sf::st_buffer(mask, dist = 8, endCapStyle = "FLAT")
   mask <- sf::st_set_crs(mask, crs)
   raster <- terra::mask(raster, terra::vect(mask), inverse = TRUE, updatevalue = 0.05)
   return(raster)

@@ -79,7 +79,6 @@ plot(seed, add = TRUE, col = "green", lwd = 3)
 plot(res$road, add = TRUE, col = "red", lwd = 2)
 plot(res$seeds, add = TRUE, col = "green", lwd = 3)
 }
-network = NULL ; fov = 160 ; sightline = 100 ; min_conductivity = 0.6 ; th_conductivity = 0.1 ; partial_gap_size = 2.5 ;
 }
 \references{
 Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim

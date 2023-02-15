@@ -16,7 +16,7 @@ vectorize_network(
 )
 }
 \arguments{
-\item{map}{raster a probability raster.  Either a binary map or a propability map the
+\item{map}{raster a probability raster.  Either a binary map or a probability map the
 former being a special case of the later (see references).}
 
 \item{seeds}{\code{sfc} a set of seeds to start driving the network (see references and examples).
@@ -31,9 +31,9 @@ they have likely an irrelevantly high sinuosity.}
 \item{min_length}{numeric. False positive may be detected and discarded based on the fact that
 they have likely an very short length.}
 
-\item{verbose}{boolean.}
+\item{verbose}{Boolean.}
 
-\item{display}{boolean. display a map in pseudo real time of the advancement. For debbuging purpose mainly.}
+\item{display}{Boolean. Display a map in pseudo real time of the advancement. For debugging purpose mainly.}
 
 \item{...}{propagated to \link{track_line}}
 }

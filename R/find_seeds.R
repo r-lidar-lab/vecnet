@@ -3,8 +3,8 @@
 #' Drive along a contour line of the raster using \link{track_line} to find seeds that will be used
 #' to vectorized the network
 #'
-#' @param map SpatRaster of probabilitie.  Either a binary map or a probability map the
-#' former being a special case of the later (see references)
+#' @param map SpatRaster. Raster of probabilities/conductivities. Either a binary map or a probability
+#' map the former being a special case of the later (see references)
 #' @param contour an sfc_POLYGON that correspond to the contour of the raster. If the raster is
 #' rectangular the default corresponds to the bounding box.
 #' @param ... propagated to \link{track_line}

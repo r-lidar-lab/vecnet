@@ -7,8 +7,8 @@
 init_seeds(map, contour = sf::st_as_sfc(sf::st_bbox(map)), ...)
 }
 \arguments{
-\item{map}{SpatRaster of probabilitie.  Either a binary map or a probability map the
-former being a special case of the later (see references)}
+\item{map}{SpatRaster. Raster of probabilities/conductivities. Either a binary map or a probability
+map the former being a special case of the later (see references)}
 
 \item{contour}{an sfc_POLYGON that correspond to the contour of the raster. If the raster is
 rectangular the default corresponds to the bounding box.}

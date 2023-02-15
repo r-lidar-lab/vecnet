@@ -18,11 +18,12 @@ track_line(
 )
 }
 \arguments{
-\item{seed}{\code{sfc_LINESTRING} a seed to start driving a road}
+\item{seed}{\code{sfc_LINESTRING}. A seed to start driving a road}
 
-\item{conductivity}{raster a conductivity raster (see references).}
+\item{conductivity}{\code{SpatRaster}. A raster with value ranging in [0,1] where roads pixels are
+close to 1 and non road pixels are close to 0 (see references).}
 
-\item{network}{a \code{sf/sfc} with an already existing network such as the algorithm
+\item{network}{\code{sf/sfc} with LINSTRING. An already existing network such as the algorithm
 can stop when vectorizing an already vectorized part of the network. Not mandatory. It is used
 automatically by \link{vectorize_network}.}
 
@@ -31,15 +32,16 @@ automatically by \link{vectorize_network}.}
 \item{sightline}{numeric (distance unit). Search distance used to find the next most probable
 point on the road (see references).}
 
-\item{min_conductivity}{numeric between 0 and 1. Corresponds to the sensitivity of the method. A
+\item{min_conductivity}{numeric. Between 0 and 1. Corresponds to the sensitivity of the method. A
 value close to 1 indicates that the algorithm follows only the pixels with a very high
 conductivity and stops easily when the average conductivity is lower than this value. With an high
 value the algorithm may miss roads. A low value indicates that the algorithm follows the pixel even
-with low conductivity and is likely to vectorize road that do not exist but is less likely to miss
+with low conductivity and is likely to vectorize roads that do not exist but is less likely to miss
 existing roads.}
 
-\item{th_conductivity}{numeric between 0 and 1. A conductivity map with too low values is not allowed
-(see reference). All the valuee lower than this value are clamped and replaced by this value.}
+\item{th_conductivity}{numeric. Between 0 and 1. A conductivity map with too low values is not allowed
+(see reference). All the values lower than this value are clamped and replaced by this value. The default
+is 0.1 meaning that every values from \code{conductivity} lower than 0.1 is set to 0.1}
 
 \item{partial_gap_size}{numeric. The algorithm can drive on low conductivity segments even if the
 conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
@@ -52,12 +54,15 @@ track for two iterations and at the third one it must be back on a high conducti
 \item{disp}{bool. Display in realtime the progress on images. For debugging purposes.}
 }
 \value{
-list, \code{road} contains the road found in a vectorial format (\code{sfc}) and \code{seed} (\code{sfc}) that
-contains all the potential intersection and seeds found along the road in a vectorial format (\code{sfc}).
+list.
+\enumerate{
+\item{\code{road} contains the road found in a vectorial format (\code{sfc}) }
+\item{\code{seed} conntains all the potential intersection and seeds found along
+ the road in a vectorial format (\code{sfc}) }}
 }
 \description{
 Drive along an unknown road in a probability map starting from small piece
-of road segment pointing in the right direction and vectorize it by returning a spatial
+of road segment pointing in the right direction and vectorize one road by returning a spatial
 line. This function is used by \link{vectorize_network} and is not intended to be used
 by regular users except for trial-and-error tests.
 }

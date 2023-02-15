@@ -6,7 +6,7 @@
 #'
 #' @param seeds  \code{sfc} a set of seeds to start driving the network (see references and examples).
 #' Can be found with \link{init_seeds}.
-#' @param map raster a probability raster.  Either a binary map or a propability map the
+#' @param map raster a probability raster.  Either a binary map or a probability map the
 #' former being a special case of the later (see references).
 #' @param network a \code{sf/sfc} with an already existing network such as the algorithm
 #' can stop when vectorizing an already vectorized part of the network.
@@ -14,8 +14,8 @@
 #' they have likely an irrelevantly high sinuosity.
 #' @param min_length numeric. False positive may be detected and discarded based on the fact that
 #' they have likely an very short length.
-#' @param verbose boolean.
-#' @param display boolean. display a map in pseudo real time of the advancement. For debbuging purpose mainly.
+#' @param verbose Boolean.
+#' @param display Boolean. Display a map in pseudo real time of the advancement. For debugging purpose mainly.
 #' @param ... propagated to \link{track_line}
 #'
 #' @references

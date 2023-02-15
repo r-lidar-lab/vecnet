@@ -1,26 +1,28 @@
 #' Drive and vectorize an unknown road
 #'
 #' Drive along an unknown road in a probability map starting from small piece
-#' of road segment pointing in the right direction and vectorize it by returning a spatial
+#' of road segment pointing in the right direction and vectorize one road by returning a spatial
 #' line. This function is used by \link{vectorize_network} and is not intended to be used
 #' by regular users except for trial-and-error tests.
 #'
-#' @param seed  \code{sfc_LINESTRING} a seed to start driving a road
-#' @param conductivity raster a conductivity raster (see references).
-#' @param network a \code{sf/sfc} with an already existing network such as the algorithm
+#' @param seed \code{sfc_LINESTRING}. A seed to start driving a road
+#' @param conductivity \code{SpatRaster}. A raster with value ranging in [0,1] where roads pixels are
+#' close to 1 and non road pixels are close to 0 (see references).
+#' @param network \code{sf/sfc} with LINSTRING. An already existing network such as the algorithm
 #' can stop when vectorizing an already vectorized part of the network. Not mandatory. It is used
 #' automatically by \link{vectorize_network}.
 #' @param fov  numeric. Field of view (degrees) ahead of the search vector (see references).
 #' @param sightline  numeric (distance unit). Search distance used to find the next most probable
 #' point on the road (see references).
-#' @param min_conductivity numeric between 0 and 1. Corresponds to the sensitivity of the method. A
+#' @param min_conductivity numeric. Between 0 and 1. Corresponds to the sensitivity of the method. A
 #' value close to 1 indicates that the algorithm follows only the pixels with a very high
 #' conductivity and stops easily when the average conductivity is lower than this value. With an high
 #' value the algorithm may miss roads. A low value indicates that the algorithm follows the pixel even
-#' with low conductivity and is likely to vectorize road that do not exist but is less likely to miss
+#' with low conductivity and is likely to vectorize roads that do not exist but is less likely to miss
 #' existing roads.
-#' @param th_conductivity numeric between 0 and 1. A conductivity map with too low values is not allowed
-#' (see reference). All the valuee lower than this value are clamped and replaced by this value.
+#' @param th_conductivity numeric. Between 0 and 1. A conductivity map with too low values is not allowed
+#' (see reference). All the values lower than this value are clamped and replaced by this value. The default
+#' is 0.1 meaning that every values from \code{conductivity} lower than 0.1 is set to 0.1
 #' @param partial_gap_size numeric. The algorithm can drive on low conductivity segments even if the
 #' conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
 #' high conductivity road is reach after the gap (see references). The allowed distance is a multiple
@@ -29,8 +31,11 @@
 #' @param ... Unused
 #' @param disp bool. Display in realtime the progress on images. For debugging purposes.
 #'
-#' @return list, \code{road} contains the road found in a vectorial format (\code{sfc}) and \code{seed} (\code{sfc}) that
-#' contains all the potential intersection and seeds found along the road in a vectorial format (\code{sfc}).
+#' @return list.
+#' \enumerate{
+#' \item{\code{road} contains the road found in a vectorial format (\code{sfc}) }
+#' \item{\code{seed} conntains all the potential intersection and seeds found along
+#'  the road in a vectorial format (\code{sfc}) }}
 #'
 #' @references
 #' Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim

@@ -14,6 +14,8 @@
 #' they have likely an irrelevantly high sinuosity.
 #' @param min_length numeric. False positive may be detected and discarded based on the fact that
 #' they have likely an very short length.
+#' @param smooth Boolean. By default the lines have one node per pixel. If true the lines are smoothed
+#' and simplified. True by default.
 #' @param verbose Boolean.
 #' @param display Boolean. Display a map in pseudo real time of the advancement. For debugging purpose mainly.
 #' @param ... propagated to \link{track_line}
@@ -78,7 +80,7 @@
 #' plot(ends, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' }
 #' @export
-vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, min_length = 200, verbose = FALSE, display = FALSE, ...)
+vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, min_length = 200, smooth = TRUE, verbose = FALSE, display = FALSE, ...)
 {
   level <- 1
   col <- c("#FF0000", "#FF6600", "#FFCC00", "#CCFF00", "#66FF00", "#00FF00",
@@ -173,6 +175,9 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
 
   network <- sf::st_geometry(network, "edges")
   #network <- sf::st_simplify(network, dTolerance = 2)
+
+  if (smooth)
+    network = smooth_network(network)
 
   return(network)
 }

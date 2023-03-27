@@ -10,6 +10,7 @@ vectorize_network(
   network = NULL,
   max_sinuosity = 1.8,
   min_length = 200,
+  smooth = TRUE,
   verbose = FALSE,
   display = FALSE,
   ...
@@ -30,6 +31,9 @@ they have likely an irrelevantly high sinuosity.}
 
 \item{min_length}{numeric. False positive may be detected and discarded based on the fact that
 they have likely an very short length.}
+
+\item{smooth}{Boolean. By default the lines have one node per pixel. If true the lines are smoothed
+and simplified. True by default.}
 
 \item{verbose}{Boolean.}
 

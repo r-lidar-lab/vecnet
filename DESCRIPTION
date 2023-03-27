@@ -1,7 +1,7 @@
 Package: vecnet
 Type: Package
 Title: Vectorization of Road Networks From Rasters and Airborne Laser Scanning
-Version: 0.1.1
+Version: 0.1.2
 Author: Jean-Romain Roussel
 Maintainer: Jean-Romain Roussel <jean-romain.roussel.1@ulaval.ca>
 Description: Functions to vectorize raster of roads. It works with binary and non binary raster, is robust to false positive, false negative and returns a topologically valid set of spatial lines.

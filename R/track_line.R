@@ -50,8 +50,8 @@
 #' library(terra)
 #' library(sf)
 #'
-#' map <- system.file("extdata", "network.tif", package = "vecnet")
-#' seeds <- system.file("extdata", "seeds.shp", package = "vecnet")
+#' map <- system.file("extdata", "network2.tif", package = "vecnet")
+#' seeds <- system.file("extdata", "seeds2.gpkg", package = "vecnet")
 #' map <- rast(map)
 #' seeds <- st_read(seeds, quiet = TRUE)
 #' seed <- st_geometry(seeds)[1]

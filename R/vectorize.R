@@ -35,12 +35,12 @@
 #' # =======================
 #'
 #' # Generate a binary map from a vector for the example
-#' network <- system.file("extdata", "network.shp", package = "vecnet")
+#' network <- system.file("extdata", "network2.gpkg", package = "vecnet")
 #' network <- buffer(vect(network), 1)
 #' map <- rast(network, resolution = 2)
 #' map <- rasterize(network, map)
 #' map[is.na(map)] = 0.1
-#' seeds <- system.file("extdata", "seeds.shp", package = "vecnet")
+#' seeds <- system.file("extdata", "seeds2.shp", package = "vecnet")
 #' seeds <- st_read(seeds) |> st_geometry()
 #'
 #' # Takes ~1 min to run
@@ -60,8 +60,8 @@
 #' # On an imperfect non binary map
 #' # =============================
 #'
-#' map <- system.file("extdata", "network.tif", package = "vecnet")
-#' seeds <- system.file("extdata", "seeds.shp", package = "vecnet")
+#' map <- system.file("extdata", "network2.tif", package = "vecnet")
+#' seeds <- system.file("extdata", "seeds2.gpkg", package = "vecnet")
 #' map <- rast(map)
 #' seeds <- st_read(seeds, quiet = TRUE) |> st_geometry()
 #' plot(map, col = viridis::inferno(25), smooth = TRUE)
@@ -78,7 +78,7 @@
 #' plot(ends, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' }
 #' @export
-vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, min_length = 400, verbose = FALSE, display = FALSE, ...)
+vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, min_length = 200, verbose = FALSE, display = FALSE, ...)
 {
   level <- 1
   col <- c("#FF0000", "#FF6600", "#FFCC00", "#CCFF00", "#66FF00", "#00FF00",
@@ -172,7 +172,7 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
   #plot(sf::st_geometry(network, "nodes"), add = TRUE, col = "black", pch = 19, cex = 0.5)
 
   network <- sf::st_geometry(network, "edges")
-  network <- sf::st_simplify(network, dTolerance = 2)
+  #network <- sf::st_simplify(network, dTolerance = 2)
 
   return(network)
 }

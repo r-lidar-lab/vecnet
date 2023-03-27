@@ -76,6 +76,7 @@
 #' plot(res, add = TRUE, col = col, lwd = 2)
 #' starts = lwgeom::st_startpoint(res)
 #' ends = lwgeom::st_endpoint(res)
+#' plot(sf::st_cast(res, "POINT"), col = "gray", add = T, pch = 19, cex = 0.2)
 #' plot(starts, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' plot(ends, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' }
@@ -83,9 +84,9 @@
 vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, min_length = 200, smooth = TRUE, verbose = FALSE, display = FALSE, ...)
 {
   level <- 1
-  col <- c("#FF0000", "#FF6600", "#FFCC00", "#CCFF00", "#66FF00", "#00FF00",
-           "#00FF66", "#00FFCC", "#00CCFF", "#0066FF", "#0000FF", "#6600FF",
-           "#CC00FF", "#FF00CC", "#FF0066") #rainbow(15)
+  col <- c("#FF0000", "#FF6600", "#FFCC00","#00FF00",
+           "#00FF66", "#00FFCC", "#0066FF","#6600FF",
+           "#CC00FF", "#FF0066")
 
   seeds = sf::st_geometry(seeds)
 

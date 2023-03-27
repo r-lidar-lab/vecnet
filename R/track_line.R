@@ -239,7 +239,7 @@ track_line <- function(seed,
     # The only way to get infinite values is to reach an existing road
     # We need to reduce the sightline to reduce down the approach speed
     j = 0
-    while (any(ans$cost >= 9999) & sightline/(2^j) > 25)
+    while (any(ans$cost >= 9999) & sightline/(2^j) > 15)
     {
       j = j+1
       tmp_angles_rad <- generate_angles(resolution, sightline/(2^j), min(fov, 90))
@@ -248,16 +248,34 @@ track_line <- function(seed,
       ans <- find_reachable(start, ends, trans, cost_max/(2^j))
     }
 
-    if (any(ans$cost >= 9999))
+    if (is.null(ans))
     {
-      message("Driving stopped because it reached another road")
+      warning("Driving stopped because not reachable point have been found", call. = FALSE)
       cost_max = -Inf
       break
     }
 
-    if (is.null(ans))
+
+    # We reach a sightline of 25 but we still have 0s. We need to connect the road
+    if (any(ans$cost >= 9999))
     {
-      warning("Driving stopped because not reachable point have been found", call. = FALSE)
+      # Need to connect the roads
+      idx <- which.min(ans$cost)
+      angle <- heading + ends$angle[idx]
+      xstart <- sf::st_coordinates(start)[1]
+      ystart <- sf::st_coordinates(start)[2]
+      xend <- xstart+50*cos(angle)
+      yend <- ystart+50*sin(angle)
+      m = matrix(c(xstart, xend, ystart, yend), ncol = 2)
+      ll <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
+      p = sf::st_intersection(ll, network)
+      idx = terra::cellFromXY(conductivity, sf::st_coordinates(p))
+      p = terra::xyFromCell(conductivity, idx)
+      ll = sf::st_coordinates(ll)[,1:2]
+      ll[2,] = p
+      L <- sf::st_sfc(sf::st_linestring(ll), crs = sf::st_crs(network))
+      list_lines[[k]] = L[[1]]
+      message("Driving stopped because it reached another road")
       cost_max = -Inf
       break
     }
@@ -399,33 +417,6 @@ track_line <- function(seed,
     sf::st_set_crs(sf::st_crs(seed))
 
 
-  if (!is.null(network) && length(network) >= 1)
-  {
-    tail_point = lwgeom::st_endpoint(newline)
-    distance_to_network = min(sf::st_distance(network, tail_point))
-    if (as.numeric(distance_to_network) < 75)
-    {
-      u = sf::st_simplify(newline, dTolerance = 2)
-      u = lwgeom::st_linesubstring(u, 0.5, 1)
-
-      #plot(u, xlim = st_bbox(u)[c(1, 3)] + c(-20,20),  ylim = st_bbox(u)[c(2, 4)] + c(-20,20))
-      #plot(network, add = T)
-      u = st_extend_line(u, 80, end = "TAIL" )
-      #plot(u, xlim = st_bbox(u)[c(1, 3)] + c(-20,20),  ylim = st_bbox(u)[c(2, 4)] + c(-20,20))
-      #plot(network, add = T)
-      p = sf::st_intersection(u, network)
-      if (length(p) == 1 && sf::st_geometry_type(p) == "POINT")
-      {
-        M = rbind(sf::st_coordinates(newline)[,1:2], sf::st_coordinates(p)[,1:2])
-        newline = sf::st_linestring(M) |> sf::st_sfc() |> sf::st_set_crs(sf::st_crs(seed))
-        cat("End of the road connected to the existing network.\n")
-      }
-
-      #plot(newline, add = T, col = "red", lwd = 2)
-      #plot(network, add = T)
-    }
-  }
-
   if (length(list_intersections) >= 1)
   {
     intersections <- do.call(c, list_intersections) |>
@@ -535,7 +526,11 @@ find_reachable <- function(start, ends, trans, cost_max)
   cost[is.infinite(cost)] <- max(9999, max(cost[!is.infinite(cost)]))
 
   # Select local minima of cost
-  smooth <- 9
+  if (length(cost) > 18)
+    smooth <- 9
+  else
+    smooth <- 1
+
   scost = -ma(cost, n = smooth)
   scost = ma(scost, n = 5)
   offset = floor(smooth/2) + floor(5/2)

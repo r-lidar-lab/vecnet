@@ -1,12 +1,12 @@
 smooth_network = function(net)
 {
-    smoothed = lapply(net, adjust_spline)
+    smoothed = lapply(net, smooth_line)
     smoothed = do.call(c, smoothed)
     sf::st_crs(smoothed) = sf::st_crs(net)
     return(smoothed)
 }
 
-adjust_spline = function(points)
+smooth_line = function(points)
 {
   # Adjust a spline to create a smooth line from points
   xroad <- sf::st_coordinates(points)[,1]

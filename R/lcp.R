@@ -39,7 +39,7 @@ transition <- function(conductivity, directions = 8, geocorrection = TRUE)
   if (use_terra)
     adj <- terra::adjacent(x, cells=Cells, pairs=TRUE, directions=directions)
   else
-    adj = raster::adjacent(x, cells=Cells, pairs=TRUE, directions=directions)
+    adj <- raster::adjacent(x, cells=Cells, pairs=TRUE, directions=directions)
 
   if(symm)
     adj <- adj[adj[,1] < adj[,2],]
@@ -63,9 +63,40 @@ transition <- function(conductivity, directions = 8, geocorrection = TRUE)
   trans = tr
 
   if (isTRUE(geocorrection))
-  {
-    trans <- gdistance::geoCorrection(trans)
-  }
+    trans <- geocorrection(trans)
 
   return(trans)
 }
+
+# Modification, simplification and use terra of the function gdistance::geoCorrection()
+geocorrection = function(x)
+{
+  adj <- gdistance::adjacencyFromTransition(x)
+  cell1 = terra::xyFromCell(x, adj[,1])
+  cell2 = terra::xyFromCell(x,adj[,2])
+
+  distance = (cell1-cell2)^2
+  distance = sqrt(distance[,1] + distance[,2])
+
+  if(gdistance::matrixValues(x) == "conductance")
+    correctionValues <- 1/distance
+  else if(gdistance::matrixValues(x) == "resistance")
+    correctionValues <- distance
+  else
+    stop("Internal error")
+
+  i <- as.integer(adj[,1] - 1)
+  j <- as.integer(adj[,2] - 1)
+  xv <- as.vector(correctionValues) #check for Inf values!
+  dims <- ncell(x)
+  correctionMatrix <- new("dgTMatrix", i = i, j = j, x = xv, Dim = as.integer(c(dims,dims)))
+  correctionMatrix <- (methods::as(correctionMatrix,"sparseMatrix"))
+
+  if (is(transitionMatrix(x), "dsCMatrix")) #isSymmetric?
+    correctionMatrix <- Matrix::forceSymmetric(correctionMatrix)
+
+  transitionCorrected <- correctionMatrix * gdistance::transitionMatrix(x)
+  gdistance::transitionMatrix(x) <- transitionCorrected
+  return(x)
+}
+

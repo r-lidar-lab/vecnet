@@ -92,7 +92,7 @@ geocorrection = function(x)
   correctionMatrix <- new("dgTMatrix", i = i, j = j, x = xv, Dim = as.integer(c(dims,dims)))
   correctionMatrix <- (methods::as(correctionMatrix,"sparseMatrix"))
 
-  if (is(transitionMatrix(x), "dsCMatrix")) #isSymmetric?
+  if (is(gdistance::transitionMatrix(x), "dsCMatrix")) #isSymmetric?
     correctionMatrix <- Matrix::forceSymmetric(correctionMatrix)
 
   transitionCorrected <- correctionMatrix * gdistance::transitionMatrix(x)

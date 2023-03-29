@@ -1,3 +1,9 @@
+# vecnet 0.1.2
+
+* New parameter `smooth` in `vectorize_network()` to return a smoothed network with few nodes
+* Fix a bugs that prevent connection between the road being vectorized and an already vectorized road.
+* Change the dataset shipped with the package
+
 # vecnet 0.1.1
 
 * New parameters `th_conductivity` and `partial_gap_size`

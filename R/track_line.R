@@ -260,6 +260,8 @@ track_line <- function(seed,
     if (any(ans$cost >= 9999))
     {
       # Need to connect the roads
+
+      # Create a prolongation line
       idx <- which.min(ans$cost)
       angle <- heading + ends$angle[idx]
       xstart <- sf::st_coordinates(start)[1]
@@ -267,15 +269,47 @@ track_line <- function(seed,
       xend <- xstart+50*cos(angle)
       yend <- ystart+50*sin(angle)
       m = matrix(c(xstart, xend, ystart, yend), ncol = 2)
-      ll <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
-      p = sf::st_intersection(ll, network)
+      prolongation <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
+
+      # Intersection between the prolongation and the existing network
+      p = sf::st_intersection(prolongation, network)
+
+      # No intersection: Double the length of the prolongation
+      if (length(p) == 0)
+      {
+        xend <- xstart+100*cos(angle)
+        yend <- ystart+100*sin(angle)
+        m = matrix(c(xstart, xend, ystart, yend), ncol = 2)
+        prolongation <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
+
+        # Intersection between the prolongation and the existing network
+        p = sf::st_intersection(prolongation, network)
+      }
+
+      # Still no intersection
+      if (length(p) == 0)
+      {
+        message("Driving stopped because it reached another road")
+        warning("Connection failure")
+        break
+      }
+      else if (length(p) > 1)
+      {
+        p = p[1]
+        warning("Connection problem. More than one line intersection")
+      }
+
+      # Round the coordinates to an existing node of the network
       idx = terra::cellFromXY(conductivity, sf::st_coordinates(p))
       p = terra::xyFromCell(conductivity, idx)
-      ll = sf::st_coordinates(ll)[,1:2]
-      ll[2,] = p
-      L <- sf::st_sfc(sf::st_linestring(ll), crs = sf::st_crs(network))
+      prolongation = sf::st_coordinates(prolongation)[,1:2]
+      prolongation[2,] = p
+
+      # Add the prolongation to the list of segment
+      L <- sf::st_sfc(sf::st_linestring(prolongation), crs = sf::st_crs(network))
       list_lines[[k]] = L[[1]]
-      message("Driving stopped because it reached another road")
+
+      message("Driving stopped because it reached another road. Roads were connected together.")
       cost_max = -Inf
       break
     }

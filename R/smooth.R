@@ -12,6 +12,8 @@ smooth_line = function(points)
   xroad <- sf::st_coordinates(points)[,1]
   yroad <- sf::st_coordinates(points)[,2]
 
+  if (length(xroad) < 4) return(sf::st_sfc(points))
+
   # Retrieve the "temporal" position along the line so we can order the points later
   xend <- xroad[length(xroad)]
   yend <- yroad[length(yroad)]
@@ -87,6 +89,6 @@ smooth_line = function(points)
   spline[nrow(spline),2] = yend
   spline <- sf::st_sfc(sf::st_linestring(spline))
   sf::st_crs(spline) <- st_crs(points)
-  spline = sf::st_simplify(spline, dTolerance = 2)
+  spline = sf::st_simplify(spline, dTolerance = 1)
   return(spline)
 }

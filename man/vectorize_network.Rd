@@ -61,7 +61,7 @@ network <- buffer(vect(network), 1)
 map <- rast(network, resolution = 2)
 map <- rasterize(network, map)
 map[is.na(map)] = 0.1
-seeds <- system.file("extdata", "seeds2.shp", package = "vecnet")
+seeds <- system.file("extdata", "seeds2.gpkg", package = "vecnet")
 seeds <- st_read(seeds) |> st_geometry()
 
 # Takes ~1 min to run
@@ -95,6 +95,7 @@ col = sample(rainbow(length(res)))
 plot(res, add = TRUE, col = col, lwd = 2)
 starts = lwgeom::st_startpoint(res)
 ends = lwgeom::st_endpoint(res)
+plot(sf::st_cast(res, "POINT"), col = "gray", add = T, pch = 19, cex = 0.2)
 plot(starts, add = TRUE, col = "black", pch = 19, cex = 0.5)
 plot(ends, add = TRUE, col = "black", pch = 19, cex = 0.5)
 }

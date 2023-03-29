@@ -42,7 +42,7 @@
 #' map <- rast(network, resolution = 2)
 #' map <- rasterize(network, map)
 #' map[is.na(map)] = 0.1
-#' seeds <- system.file("extdata", "seeds2.shp", package = "vecnet")
+#' seeds <- system.file("extdata", "seeds2.gpkg", package = "vecnet")
 #' seeds <- st_read(seeds) |> st_geometry()
 #'
 #' # Takes ~1 min to run
@@ -106,7 +106,7 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
     for (i in seq_along(seeds))
     {
       tryCatch({
-        res <- track_line(seeds[i], map, network = network, ...)
+        res <- track_line(seeds[i], map, network = network)#, ...)
       },
       error = function(e) {
         seed = seeds[i]
@@ -115,7 +115,11 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
         sf::st_write(seed, f1)
         sf::st_write(network, f2)
         message(e)
-        stop("Internal error. \n seed logged at: ", f1, "\n network logged: ", f2, call. = FALSE)
+
+        stop("Internal error. Reproduce with:
+             seed = sf::st_read('", f1, "')
+             netw = sf::st_read('", f2, "')
+             track_line(seed, ", substitute(map), ", netw)" , call. = FALSE)
       })
 
       len <- as.numeric(sf::st_length(res$road))

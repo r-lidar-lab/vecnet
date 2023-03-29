@@ -77,9 +77,9 @@ map <- rast(map)
 seeds <- st_read(seeds, quiet = TRUE)
 seed <- st_geometry(seeds)[1]
 
-res <- track_line(seed, map, min_conductivity = 0.5)
+res <- track_line(seed, map, min_conductivity = 0.6)
 
-plot(map, col = viridis::inferno(25))
+plot(map, col = viridis::inferno(25), smooth =T)
 plot(seed, add = TRUE, col = "green", lwd = 3)
 plot(res$road, add = TRUE, col = "red", lwd = 2)
 plot(res$seeds, add = TRUE, col = "green", lwd = 3)

@@ -56,9 +56,9 @@
 #' seeds <- st_read(seeds, quiet = TRUE)
 #' seed <- st_geometry(seeds)[1]
 #'
-#' res <- track_line(seed, map, min_conductivity = 0.5)
+#' res <- track_line(seed, map, min_conductivity = 0.6)
 #'
-#' plot(map, col = viridis::inferno(25))
+#' plot(map, col = viridis::inferno(25), smooth =T)
 #' plot(seed, add = TRUE, col = "green", lwd = 3)
 #' plot(res$road, add = TRUE, col = "red", lwd = 2)
 #' plot(res$seeds, add = TRUE, col = "green", lwd = 3)
@@ -256,7 +256,7 @@ track_line <- function(seed,
     }
 
 
-    # We reach a sightline of 25 but we still have 0s. We need to connect the road
+    # We reach a sightline of 15 but we still have 0s. We need to connect the road
     if (any(ans$cost >= 9999))
     {
       # Need to connect the roads
@@ -308,6 +308,21 @@ track_line <- function(seed,
       # Add the prolongation to the list of segment
       L <- sf::st_sfc(sf::st_linestring(prolongation), crs = sf::st_crs(network))
       list_lines[[k]] = L[[1]]
+
+      if (disp)
+      {
+        terra::plot(terra::crop(sub_aoi_conductivity, terra::ext(aoi) + 80),
+                    col = viridis::inferno(50),
+                    main = paste0(k,"/", n),
+                    range = c(0,1),
+                    axes = FALSE)
+        terra::plot(aoi, add = T, col = viridis::inferno(50))
+        terra::plot(terra::ext(aoi), add = T)
+        plot(start, add = T, col ="red", pch = 19)
+        plot(network, add = T, col = "green")
+        plot(L, add = T, col = "red")
+        plot(lwgeom::st_endpoint(L), add = T, col = "green", pch = 19)
+      }
 
       message("Driving stopped because it reached another road. Roads were connected together.")
       cost_max = -Inf
@@ -560,8 +575,10 @@ find_reachable <- function(start, ends, trans, cost_max)
   cost[is.infinite(cost)] <- max(9999, max(cost[!is.infinite(cost)]))
 
   # Select local minima of cost
-  if (length(cost) > 18)
+  if (length(cost) > 36)
     smooth <- 9
+  else if (length(cost > 18))
+    smooth = 2
   else
     smooth <- 1
 

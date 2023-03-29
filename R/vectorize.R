@@ -46,7 +46,7 @@
 #' seeds <- st_read(seeds) |> st_geometry()
 #'
 #' # Takes ~1 min to run
-#' res <- vectorize_network(map, seeds, min_length = 150,  min_conductivity = 0.3, display = TRUE)
+#' res <- vectorize_network(map, seeds, min_length = 150,  min_conductivity = 0.6, display = TRUE)
 #'
 #' # notice that some parts of the network are missing because they are not reachable
 #' # with the seed used in this example.
@@ -76,7 +76,6 @@
 #' plot(res, add = TRUE, col = col, lwd = 2)
 #' starts = lwgeom::st_startpoint(res)
 #' ends = lwgeom::st_endpoint(res)
-#' plot(sf::st_cast(res, "POINT"), col = "gray", add = T, pch = 19, cex = 0.2)
 #' plot(starts, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' plot(ends, add = TRUE, col = "black", pch = 19, cex = 0.5)
 #' }

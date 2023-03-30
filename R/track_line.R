@@ -260,6 +260,8 @@ track_line <- function(seed,
     if (any(ans$cost >= 9999))
     {
       # Need to connect the roads
+      if(length(list_lines) <= 3)
+        break
 
       # Create a prolongation line
       idx <- which.min(ans$cost)
@@ -286,14 +288,19 @@ track_line <- function(seed,
         p = sf::st_intersection(prolongation, network)
       }
 
-      # Still no intersection
+      # Still no intersection we may be in the wrong direction e.g. if we are trying to
+      # connect a parallel line we have 0 tolerance. Connect to the NN
       if (length(p) == 0)
       {
-        message("Driving stopped because it reached another road")
-        warning("Connection failure")
-        break
+        bbb = sf::st_buffer(start, dist = 50)
+        sf::st_crs(start) = sf::st_crs(network)
+        sf::st_crs(bbb) = sf::st_crs(network)
+        subnet = sf::st_intersection(network, bbb)
+        prolongation = sf::st_nearest_points(start, subnet)
+        p = lwgeom::st_endpoint(prolongation)
       }
-      else if (length(p) > 1)
+
+      if (length(p) > 1)
       {
         p = p[1]
         warning("Connection problem. More than one line intersection")
@@ -326,6 +333,8 @@ track_line <- function(seed,
 
       message("Driving stopped because it reached another road. Roads were connected together.")
       cost_max = -Inf
+      novercost = 0
+      dovercost = 0
       break
     }
 
@@ -455,7 +464,7 @@ track_line <- function(seed,
     }
   }
 
-  list_lines <- list_lines[1:(length(list_lines)-novercost)]
+list_lines <- list_lines[1:(length(list_lines)-novercost)]
   first = list_lines[[1]]
   list_lines <- lapply(list_lines, function(x) { x <- x[] ; return(x[-1,])})
   list_lines[[1]] = first

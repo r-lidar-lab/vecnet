@@ -75,52 +75,56 @@ track_line <- function(seed,
                        disp = FALSE)
 {
   # network = NULL ; fov = 160 ; sightline = 100 ; min_conductivity = 0.6 ; th_conductivity = 0.1 ; partial_gap_size = 2.5 ;
-  t0 <- Sys.time()
+  debug = FALSE
 
   if (methods::is(seed, "sf")) seed = sf::st_geometry(seed)
   if (!methods::is(seed, "sfc_LINESTRING")) stop("seed must be sfc_LINESTRING")
   if (length(seed) != 1L) stop("seed must be of length 1")
   if (!methods::is(conductivity, "SpatRaster")) stop("conductivity must be a SpatRaster")
-
   if (!is.null(network)) network = sf::st_geometry(network)
-
-  # We need an orthogonal raster
   resolution <- terra::res(conductivity)
   if (resolution[1] != resolution[2]) stop("'conductivity' raster must have the same resolution in both X and Y axis.", call. = FALSE)
   resolution <- resolution[1]
 
+  t0 <- Sys.time()
+
   # Retains a trace of already explored areas
   trace <- sf::st_geometry(seed)
 
-  # Because we want an "overall" direction and we want to drop
-  # smooth little imperfections in the seed if any.
-  seed <- sf::st_simplify(seed, dTolerance = 5)
+  # We want an "overall" direction and we want to smooth little imperfections in the seed (if any).
+  seed <- sf::st_simplify(seed, FALSE, dTolerance = 5)
 
-  # Threshold of cost to stop the search.
+  # Threshold of cost to stop the search. If a path has a cost > cost_max if triggers a stop signal
   cost_max <- sightline * 1/min_conductivity
 
   # Initialization of list of coordinates with starting line
   start_pts <- sf::st_cast(sf::st_geometry(seed), "POINT")
+  list_lines <- list(sf::st_geometry(seed)[[1]])
+  list_intersections <- list()
+
+  # Initialization of the direction of the search
   n <- length(start_pts)
   start <- start_pts[n-1][[1]]
   end <- start_pts[n][[1]]
-  #list_coords <- list(start, end)
-  list_lines <- list(sf::st_geometry(seed)[[1]])
-  list_intersections <- list()
   heading <- get_heading(start, end)
 
-  sub_aoi_conductivity <- query_conductivity_aoi(conductivity, seed, smooth = T)
+  # Extraction of a small region of interest to work with. This region is loaded in memory but the map may be not.
+  sub_aoi_conductivity <- query_conductivity_aoi(conductivity, seed, smooth = TRUE)
   sub_aoi_conductivity[sub_aoi_conductivity < th_conductivity] = th_conductivity
 
-  #plot(conductivity, col = viridis::inferno(50))
-  #plot(terra::ext(sub_aoi_conductivity), col = "red", add = T, alpha = 0.3)
-  #plot(seed, add = T, lwd = 3, col = "blue")
-  #plot(sub_aoi_conductivity, col = viridis::inferno(50))
+  if (debug)
+  {
+    plot(conductivity, col = viridis::inferno(50))
+    plot(terra::ext(sub_aoi_conductivity), col = "red", add = T, alpha = 0.3)
+    plot(seed, add = T, lwd = 3, col = "blue")
+    plot(sub_aoi_conductivity, col = viridis::inferno(50))
+  }
 
   # Mask the existing road to avoid driving a known road
+  # The find_seed_mode is a special hidden feature used in init_seeds(). It masks the network with the value 2 instead of 0.
   dots = list(...)
-  mask_value = 0
-  buffer = 10
+  mask_value <- 0
+  buffer <- 10
   find_seek_mask = NULL
   if (!is.null(dots$find_seed_mode))
   {
@@ -131,32 +135,39 @@ track_line <- function(seed,
 
   sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value, buffer)
 
+  # The exterior boundaries of the init_seed() polygon is set to th_conductivity to avoid having
+  # seed toward the exterior of the raster when finding initial seeds.
   if (!is.null(find_seek_mask))
     sub_aoi_conductivity = terra::mask(sub_aoi_conductivity, find_seek_mask, inverse = TRUE, updatevalue = th_conductivity)
 
   # Init view angles as a function of the resolution of the raster and the sightline
   angles_rad <- generate_angles(resolution, sightline, fov)
 
+  # Some arbitrary parameter
+  pahead   = 0.8      # The agent move only of 80% of the path found and does not make a full step
+  pheading = 0.5      # The percentage of the previous lines used to compute the search orientation
+  sightline_min = 15  # The minimum sighline distance
+
   # Loop initialization
-  current_cost <- 0
-  k <- 2
-  n <- 1
-  overcost = 0
-  novercost = 0
-  dovercost = 0
+  current_cost <- 0   # Current cost
+  k <- 2              # current index
+  n <- 1              # current iteration
+  overcost = 0        # The sum of the costs of consecutive lines with a cost superior to cost_max
+  novercost = 0       # The number of consecutive time we have lines with a cost superior to cost_max
+  dovercost = 0       # The number total distance of consecutive lines with a cost superior to cost_max
 
   while (dovercost <= partial_gap_size*sightline & !is.infinite(cost_max))
   {
     if (k %% 5 == 0)
     {
-      dist = (k-1)*sightline*0.8
+      dist = (k-1)*sightline*pahead
       cat(dist, " m (", get_speed(dist, t0), " km/h)\r", sep = "")
+      utils::flush.console()
     }
-    utils::flush.console()
 
     # Compute heading from the previous segment
     l <- list_lines[[k-1]]
-    l <- lwgeom::st_linesubstring(l, 0.5, 1)
+    l <- lwgeom::st_linesubstring(l, pheading, 1)
     p1 <- lwgeom::st_startpoint(l)[[1]]
     p2 <- lwgeom::st_endpoint(l)[[1]]
     heading <- get_heading(p1, p2)
@@ -168,27 +179,30 @@ track_line <- function(seed,
 
     # Generate a very small area of interest corresponding to what can be seen in the line of sight
     search_zone <- sf::st_bbox(c(start, sf::st_geometry(ends)))
-    search_zone <- terra::ext(c(search_zone[1], search_zone[3],search_zone[2],search_zone[4])) + 10
+    search_zone <- terra::ext(search_zone) + 10
     aoi <- terra::crop(sub_aoi_conductivity, search_zone)
-    #aoi <- terra::stretch(aoi, maxv = 1)
+
+    # Mask this area to keep only the sighof view
     p <- sf::st_polygon(list(rbind(sf::st_coordinates(start), sf::st_coordinates(ends), sf::st_coordinates(start))))
     p <- sf::st_sfc(p)
     p <- sf::st_buffer(p, 2)
     p <- terra::vect(p)
     terra::crs(p) <- terra::crs(aoi)
     aoi <- terra::mask(aoi, p)
-    #plot(aoi, col = viridis::inferno(50), range = c(0,1))
-    #plot(start,add =T, col = "red", pch = 19)
-    #plot(ends$geometry,add =T, col = "red", pch = 19)
+
+    if (debug)
+    {
+      plot(aoi, col = viridis::inferno(50), range = c(0,1))
+      plot(start,add =T, col = "red", pch = 19)
+      plot(ends$geometry,add =T, col = "red", pch = 19, cex = 0.3)
+    }
 
     # Compute the transition matrix for this AOI
     trans <- transition(aoi, geocorrection = TRUE)
 
-    # Check if some ends fall outside of the AOI
-    # If any we  reached the loaded part of the conductivity.
-    # Reload another raster part further ahead.
-    val <- terra::extract(aoi, sf::st_coordinates(ends))[[1]]
-    if (any(is.na(val)))
+    # Check if some point of the sighline fall outside of the AOI
+    # If any we reached the edge of the loaded part of the map. We need to load another part ahead.
+    if (has_na_in_sightline(aoi, ends))
     {
       # Make a newly sub aoi conductivity raster further ahead
       line <- sf::st_cast(c(p1, p2), "LINESTRING") |> sf::st_sfc()
@@ -197,9 +211,13 @@ track_line <- function(seed,
       sub_aoi_conductivity <- query_conductivity_aoi(conductivity, line, smooth = T)
       sub_aoi_conductivity[sub_aoi_conductivity < th_conductivity] = th_conductivity
       n = n+1
-      #terra::plot(conductivity, col = viridis::inferno(50))
-      #terra::plot(terra::ext(sub_aoi_conductivity), col = "red", add = T)
-      #plot(seed, add = T, lwd = 3, col = "red")
+
+      if (debug)
+      {
+        terra::plot(conductivity, col = viridis::inferno(50))
+        terra::plot(terra::ext(sub_aoi_conductivity), border = "red", add = T)
+        plot(seed, add = T, lwd = 3, col = "red")
+      }
 
       sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value, buffer)
       sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, trace, 0, 5, sf::st_crs(seed))
@@ -209,37 +227,34 @@ track_line <- function(seed,
 
       # Check again if some ends fall outside of the newly cropped conductivity raster
       # If yes we are close to the edge of the raster. Try again with half the sightline
-      val <- terra::extract(sub_aoi_conductivity, sf::st_coordinates(ends))[[1]]
-      if (any(is.na(val)))
+      if (has_na_in_sightline(sub_aoi_conductivity, ends))
       {
         tmp_angles_rad <- generate_angles(resolution, sightline/2, fov)
         ends <- generate_ends(p2, tmp_angles_rad, sightline/2, heading)
         ends$angle <- tmp_angles_rad
       }
 
-      # If we still have NA we reached the border of the conductivity map
-      val <- terra::extract(sub_aoi_conductivity, sf::st_coordinates(ends))[[1]]
-      if (any(is.na(val)))
+      # If we still have NAs we reached the border of the conductivity map. We are done.
+      if (has_na_in_sightline(sub_aoi_conductivity, ends))
       {
-        message("Drive stopped early. Edge of conductivity raster has been reached.")
+        #message("Drive stopped early. Edge of conductivity raster has been reached.")
         cost_max <- -Inf
         break
       }
 
       # Re-extract the AOI and recompute the transition
       aoi <- terra::crop(sub_aoi_conductivity, search_zone)
-      #aoi <- terra::stretch(aoi, maxv = 1)
       trans <- transition(aoi, geocorrection = TRUE)
     }
 
-    # Estimates the cost to reach each end points and returns the main direction and
+    # Estimates the cost to reach each end points of the sighline and returns the main direction and
     # other possible directions (i.e. intersections)
     ans <- find_reachable(start, ends, trans, cost_max)
 
     # The only way to get infinite values is to reach an existing road
-    # We need to reduce the sightline to reduce down the approach speed
+    # We need to reduce the sightline to reduce down the approach speed and connect accurately
     j = 0
-    while (any(ans$cost >= 9999) & sightline/(2^j) > 15)
+    while (any_infinite_cost(ans$cost) & sightline/(2^j) > sightline_min)
     {
       j = j+1
       tmp_angles_rad <- generate_angles(resolution, sightline/(2^j), min(fov, 90))
@@ -255,13 +270,12 @@ track_line <- function(seed,
       break
     }
 
-
-    # We reach a sightline of 15 but we still have 0s. We need to connect the road
-    if (any(ans$cost >= 9999))
+    # We reach a sightline limit but we still have 0s (and thus infinite cost).
+    # We need to connect the road
+    if (any_infinite_cost(ans$cost))
     {
-      # Need to connect the roads
-      if(length(list_lines) <= 3)
-        break
+      # No need to connect the roads it is to short (bug fix)
+      if(length(list_lines) <= 3) break
 
       # Create a prolongation line
       idx <- which.min(ans$cost)
@@ -276,7 +290,7 @@ track_line <- function(seed,
       # Intersection between the prolongation and the existing network
       p = sf::st_intersection(prolongation, network)
 
-      # No intersection: Double the length of the prolongation
+      # No intersection: double the length of the prolongation
       if (length(p) == 0)
       {
         xend <- xstart+100*cos(angle)
@@ -289,7 +303,7 @@ track_line <- function(seed,
       }
 
       # Still no intersection we may be in the wrong direction e.g. if we are trying to
-      # connect a parallel line we have 0 tolerance. Connect to the NN
+      # connect to a parallel line we have 0 tolerance. Connect to the NN
       if (length(p) == 0)
       {
         bbb = sf::st_buffer(start, dist = 50)
@@ -338,36 +352,43 @@ track_line <- function(seed,
       break
     }
 
+    # We now have the cost to reach each point of the sightline and the peaks in the cost
+    # profile indicating which point we must reach
+    cost <- ans$cost
+
+    # The main direction
     idx_main <- ans$minima$idx[1]
     depth_main = ans$minima$depth[1]
-    idx_other <- ans$minima$idx[-1]
-    cost <- ans$cost
-    releative_cost <- ans$minima$rcost
-    current_cost <- releative_cost[1]
-
+    current_cost <- ans$minima$rcost[1]
     end <- ends[idx_main,]
-    ends_other <- ends[idx_other,]
-    cost_other <- releative_cost[-1]
 
+    # The other direction
+    idx_other <- ans$minima$idx[-1]
+    releative_cost <- ans$minima$rcost
+    ends_other <- ends[idx_other,]
+    cost_other <- ans$minima$rcost[-1]
+
+    # Check the angle between the main road and the other road. If the angle is < 15 degrees there
+    # are false positive.
+    # (This is probably not useful anymore but was need to fix bugs when using very poor map)
     delta_angle = abs(end$angle - ends_other$angle)*180/pi
     ends_other = ends_other[delta_angle > 15,]
     cost_other = cost_other[delta_angle > 15]
 
+    # Compute the shortest path between the starting points and the valid end points and c
     L <- gdistance::shortestPath(trans, sf::st_coordinates(start), sf::st_coordinates(end), output = "SpatialLines")
     L <- sf::st_geometry(sf::st_as_sf(L))
     C <- sf::st_coordinates(L)
-    C <- C[1:(nrow(C)*0.8),-3]
+    C <- C[1:(nrow(C)*pahead),-3]
     L <- sf::st_sfc(sf::st_linestring(C))
-    end <- lwgeom::st_endpoint(L)
-
-    #list_coords[[k+1]] <- sf::st_geometry(end)[[1]]
     list_lines[[k]] <- L[[1]]
+
+    # Leave a trace of already seen roads and protect against infinite loops /!\
     trace <- st_join_linestring(trace, L)
+    sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, trace, 0, 5, sf::st_crs(seed))
 
-    # Protect against infinite loops
-    sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, trace, 0, 5,sf::st_crs(seed))
-    #plot(sub_aoi_conductivity, col = viridis::inferno(50))
-
+    # If the current cost is > 1 it means that we drove on a track that is partially or totally
+    # not labelled as road. We record this state
     if (current_cost > 1)
     {
       novercost = novercost + 1
@@ -381,6 +402,7 @@ track_line <- function(seed,
       overcost = 0
     }
 
+    # Now we are processing the intersection founds (if any)
     I <- NULL
     if (length(sf::st_geometry(ends_other)) > 0)
     {
@@ -405,10 +427,12 @@ track_line <- function(seed,
       }
     }
 
+    # We finished the iteration k. Increment the counter
     k <- k + 1
 
     if (disp)
     {
+      end <- lwgeom::st_endpoint(L)
 
       if (length(angles_rad) == length(cost))
       {
@@ -512,7 +536,6 @@ list_lines <- list_lines[1:(length(list_lines)-novercost)]
   return(list(road = newline, seeds = intersections, dintersection = dintersection))
 }
 
-# Very similar to st_ends_heading()
 get_heading <- function(from, to)
 {
   from <- sf::st_coordinates(from)
@@ -699,6 +722,18 @@ get_speed = function(dist, t0)
   speed = round(speed, 0)
   return(speed)
 }
+
+has_na_in_sightline = function(map, ends)
+{
+  val <- terra::extract(map, sf::st_coordinates(ends))[[1]]
+  return(any(is.na(val)))
+}
+
+any_infinite_cost = function(cost)
+{
+  return(any(cost >= 9999))
+}
+
 
 # paper_figure = function()
 # {

@@ -6,13 +6,12 @@
 \usage{
 track_line(
   seed,
-  conductivity,
+  map,
   network = NULL,
   fov = 160,
   sightline = 100,
   min_conductivity = 0.6,
   th_conductivity = 0.1,
-  partial_gap_size = 2.5,
   ...,
   disp = FALSE
 )
@@ -20,8 +19,8 @@ track_line(
 \arguments{
 \item{seed}{\code{sfc_LINESTRING}. A seed to start driving a road}
 
-\item{conductivity}{\code{SpatRaster}. A raster with value ranging in [0,1] where roads pixels are
-close to 1 and non road pixels are close to 0 (see references).}
+\item{map}{\code{SpatRaster}. A raster with value ranging in [0,1] where roads pixels are
+close to 1 and non road pixels are close to 0 (see references). Also called conductivity map.}
 
 \item{network}{\code{sf/sfc} with LINSTRING. An already existing network such as the algorithm
 can stop when vectorizing an already vectorized part of the network. Not mandatory. It is used
@@ -43,12 +42,6 @@ existing roads.}
 (see reference). All the values lower than this value are clamped and replaced by this value. The default
 is 0.1 meaning that every values from \code{conductivity} lower than 0.1 is set to 0.1}
 
-\item{partial_gap_size}{numeric. The algorithm can drive on low conductivity segments even if the
-conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
-high conductivity road is reach after the gap (see references). The allowed distance is a multiple
-of the sightline. Default is 2.5 which roughly means that it can follow a too low conductivity
-track for two iterations and at the third one it must be back on a high conductivity track.}
-
 \item{...}{Unused}
 
 \item{disp}{bool. Display in realtime the progress on images. For debugging purposes.}
@@ -57,7 +50,7 @@ track for two iterations and at the third one it must be back on a high conducti
 list.
 \enumerate{
 \item{\code{road} contains the road found in a vectorial format (\code{sfc}) }
-\item{\code{seed} conntains all the potential intersection and seeds found along
+\item{\code{seed} contains all the potential intersection and seeds found along
  the road in a vectorial format (\code{sfc}) }}
 }
 \description{
@@ -77,7 +70,7 @@ map <- rast(map)
 seeds <- st_read(seeds, quiet = TRUE)
 seed <- st_geometry(seeds)[1]
 
-res <- track_line(seed, map, min_conductivity = 0.6)
+res <- track_line(seed, map)
 
 plot(map, col = viridis::inferno(25), smooth =T)
 plot(seed, add = TRUE, col = "green", lwd = 3)
@@ -87,7 +80,8 @@ plot(res$seeds, add = TRUE, col = "green", lwd = 3)
 }
 \references{
 Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim
-(2022) Vectorial and topologically valid segmentation of forestry road networks from ALS data. In prep.\cr\cr
+(2023) Vectorial and topologically valid segmentation of forestry road networks from ALS data.
+Journal of Applied Earth Observation and Geoinformation.\cr\cr
 Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim
 (2022) Correction, update, and enhancement of vectorial forestry road maps using ALS data, a
 pathfinder, and seven metrics. Journal of Applied Earth Observation and Geoinformation.

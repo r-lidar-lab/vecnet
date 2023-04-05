@@ -24,7 +24,7 @@ to vectorized the network
 library(terra)
 library(sf)
 
-map <- system.file("extdata", "network.tif", package = "vecnet")
+map <- system.file("extdata", "network2.tif", package = "vecnet")
 map <- rast(map)
 
 seeds = init_seeds(map, min_conductivity = 0.8)

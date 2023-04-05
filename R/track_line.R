@@ -6,8 +6,8 @@
 #' by regular users except for trial-and-error tests.
 #'
 #' @param seed \code{sfc_LINESTRING}. A seed to start driving a road
-#' @param conductivity \code{SpatRaster}. A raster with value ranging in [0,1] where roads pixels are
-#' close to 1 and non road pixels are close to 0 (see references).
+#' @param map \code{SpatRaster}. A raster with value ranging in [0,1] where roads pixels are
+#' close to 1 and non road pixels are close to 0 (see references). Also called conductivity map.
 #' @param network \code{sf/sfc} with LINSTRING. An already existing network such as the algorithm
 #' can stop when vectorizing an already vectorized part of the network. Not mandatory. It is used
 #' automatically by \link{vectorize_network}.
@@ -23,23 +23,19 @@
 #' @param th_conductivity numeric. Between 0 and 1. A conductivity map with too low values is not allowed
 #' (see reference). All the values lower than this value are clamped and replaced by this value. The default
 #' is 0.1 meaning that every values from \code{conductivity} lower than 0.1 is set to 0.1
-#' @param partial_gap_size numeric. The algorithm can drive on low conductivity segments even if the
-#' conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
-#' high conductivity road is reach after the gap (see references). The allowed distance is a multiple
-#' of the sightline. Default is 2.5 which roughly means that it can follow a too low conductivity
-#' track for two iterations and at the third one it must be back on a high conductivity track.
 #' @param ... Unused
 #' @param disp bool. Display in realtime the progress on images. For debugging purposes.
 #'
 #' @return list.
 #' \enumerate{
 #' \item{\code{road} contains the road found in a vectorial format (\code{sfc}) }
-#' \item{\code{seed} conntains all the potential intersection and seeds found along
+#' \item{\code{seed} contains all the potential intersection and seeds found along
 #'  the road in a vectorial format (\code{sfc}) }}
 #'
 #' @references
 #' Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim
-#' (2022) Vectorial and topologically valid segmentation of forestry road networks from ALS data. In prep.\cr\cr
+#' (2023) Vectorial and topologically valid segmentation of forestry road networks from ALS data.
+#' Journal of Applied Earth Observation and Geoinformation.\cr\cr
 #' Jean-Romain Roussel, Jean-François Bourdon , Ilythia D. Morley , Nicholas C. Coops, Alexis Achim
 #' (2022) Correction, update, and enhancement of vectorial forestry road maps using ALS data, a
 #' pathfinder, and seven metrics. Journal of Applied Earth Observation and Geoinformation.
@@ -56,7 +52,7 @@
 #' seeds <- st_read(seeds, quiet = TRUE)
 #' seed <- st_geometry(seeds)[1]
 #'
-#' res <- track_line(seed, map, min_conductivity = 0.6)
+#' res <- track_line(seed, map)
 #'
 #' plot(map, col = viridis::inferno(25), smooth =T)
 #' plot(seed, add = TRUE, col = "green", lwd = 3)
@@ -64,349 +60,579 @@
 #' plot(res$seeds, add = TRUE, col = "green", lwd = 3)
 #' }
 track_line <- function(seed,
-                       conductivity,
+                       map,
                        network = NULL,
                        fov = 160,
                        sightline = 100,
                        min_conductivity = 0.6,
                        th_conductivity = 0.1,
-                       partial_gap_size = 2.5,
                        ...,
                        disp = FALSE)
 {
   # network = NULL ; fov = 160 ; sightline = 100 ; min_conductivity = 0.6 ; th_conductivity = 0.1 ; partial_gap_size = 2.5 ;
   debug = FALSE
 
+  # Defensive programming
   if (methods::is(seed, "sf")) seed = sf::st_geometry(seed)
   if (!methods::is(seed, "sfc_LINESTRING")) stop("seed must be sfc_LINESTRING")
   if (length(seed) != 1L) stop("seed must be of length 1")
-  if (!methods::is(conductivity, "SpatRaster")) stop("conductivity must be a SpatRaster")
+  if (!methods::is(map, "SpatRaster")) stop("map must be a SpatRaster")
   if (!is.null(network)) network = sf::st_geometry(network)
-  resolution <- terra::res(conductivity)
-  if (resolution[1] != resolution[2]) stop("'conductivity' raster must have the same resolution in both X and Y axis.", call. = FALSE)
+  resolution <- terra::res(map)
+  if (resolution[1] != resolution[2]) stop("'map' raster must have the same resolution in both X and Y axis.", call. = FALSE)
   resolution <- resolution[1]
 
   t0 <- Sys.time()
 
-  # Retains a trace of already explored areas
-  trace <- sf::st_geometry(seed)
+  # We are working with large rasters not loaded in memory. We must load in memory some small parts
+  # iteratively wile driving. This object handle the logic of querying subsets in a larger map
+  mapper <- MapManager$new(map, th_conductivity = th_conductivity, smooth = TRUE)
+  mapper$set_search_seed_mode(list(...)$seed_mode)
+  mapper$query_aoi(seed)
+  mapper$mask_network(network)
 
-  # We want an "overall" direction and we want to smooth little imperfections in the seed (if any).
-  seed <- sf::st_simplify(seed, FALSE, dTolerance = 5)
+  # This object handles the logic of least cost based driving
+  driver = DrivingAgent$new(sightline = sightline, fov = fov, resolution = resolution, min_conductivity = min_conductivity)
+  driver$set_seed(seed)
 
-  # Threshold of cost to stop the search. If a path has a cost > cost_max if triggers a stop signal
-  cost_max <- sightline * 1/min_conductivity
-
-  # Initialization of list of coordinates with starting line
-  start_pts <- sf::st_cast(sf::st_geometry(seed), "POINT")
-  list_lines <- list(sf::st_geometry(seed)[[1]])
-  list_intersections <- list()
-
-  # Initialization of the direction of the search
-  n <- length(start_pts)
-  start <- start_pts[n-1][[1]]
-  end <- start_pts[n][[1]]
-  heading <- get_heading(start, end)
-
-  # Extraction of a small region of interest to work with. This region is loaded in memory but the map may be not.
-  sub_aoi_conductivity <- query_conductivity_aoi(conductivity, seed, smooth = TRUE)
-  sub_aoi_conductivity[sub_aoi_conductivity < th_conductivity] = th_conductivity
-
-  if (debug)
+  # Loop while the driver can move forward
+  while (!driver$reached_end())
   {
-    plot(conductivity, col = viridis::inferno(50))
-    plot(terra::ext(sub_aoi_conductivity), col = "red", add = T, alpha = 0.3)
-    plot(seed, add = T, lwd = 3, col = "blue")
-    plot(sub_aoi_conductivity, col = viridis::inferno(50))
-  }
+    driver$print_speed(t0)
+    driver$query_sightview(mapper$aoi)
 
-  # Mask the existing road to avoid driving a known road
-  # The find_seed_mode is a special hidden feature used in init_seeds(). It masks the network with the value 2 instead of 0.
-  dots = list(...)
-  mask_value <- 0
-  buffer <- 10
-  find_seek_mask = NULL
-  if (!is.null(dots$find_seed_mode))
-  {
-    mask_value = 2
-    buffer = 2
-    find_seek_mask = terra::vect(dots$find_seed_mode)
-  }
 
-  sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value, buffer)
-
-  # The exterior boundaries of the init_seed() polygon is set to th_conductivity to avoid having
-  # seed toward the exterior of the raster when finding initial seeds.
-  if (!is.null(find_seek_mask))
-    sub_aoi_conductivity = terra::mask(sub_aoi_conductivity, find_seek_mask, inverse = TRUE, updatevalue = th_conductivity)
-
-  # Init view angles as a function of the resolution of the raster and the sightline
-  angles_rad <- generate_angles(resolution, sightline, fov)
-
-  # Some arbitrary parameter
-  pahead   = 0.8      # The agent move only of 80% of the path found and does not make a full step
-  pheading = 0.5      # The percentage of the previous lines used to compute the search orientation
-  sightline_min = 15  # The minimum sighline distance
-
-  # Loop initialization
-  current_cost <- 0   # Current cost
-  k <- 2              # current index
-  n <- 1              # current iteration
-  overcost = 0        # The sum of the costs of consecutive lines with a cost superior to cost_max
-  novercost = 0       # The number of consecutive time we have lines with a cost superior to cost_max
-  dovercost = 0       # The number total distance of consecutive lines with a cost superior to cost_max
-
-  while (dovercost <= partial_gap_size*sightline & !is.infinite(cost_max))
-  {
-    if (k %% 5 == 0)
+    if (driver$is_on_edge())
     {
-      dist = (k-1)*sightline*pahead
-      cat(dist, " m (", get_speed(dist, t0), " km/h)\r", sep = "")
-      utils::flush.console()
-    }
+      # If the driving agent is on the edge of the loaded aoi we must load a new aoi ahead
+      mapper$query_aoi(driver$get_seed())
+      mapper$mask_network(network)
+      mapper$mask_trace(driver$get_trace())
+      driver$query_sightview(mapper$aoi)
 
-    # Compute heading from the previous segment
-    l <- list_lines[[k-1]]
-    l <- lwgeom::st_linesubstring(l, pheading, 1)
-    p1 <- lwgeom::st_startpoint(l)[[1]]
-    p2 <- lwgeom::st_endpoint(l)[[1]]
-    heading <- get_heading(p1, p2)
+      # If the driving agent is still on the edge of the loaded aoi it means that we are really on
+      # the edge of the full raster. Divide the sightline to reach the edge doing smaller steps
+      if (driver$is_on_edge())
+        driver$divide_sightline()
 
-    # Create all possible ends ahead of the previous points
-    start <- sf::st_sfc(p2)
-    ends <- generate_ends(p2, angles_rad, sightline, heading)
-    ends$angle = angles_rad
+      if (driver$is_on_edge())
+        driver$divide_sightline()
 
-    # Generate a very small area of interest corresponding to what can be seen in the line of sight
-    search_zone <- sf::st_bbox(c(start, sf::st_geometry(ends)))
-    search_zone <- terra::ext(search_zone) + 10
-    aoi <- terra::crop(sub_aoi_conductivity, search_zone)
-
-    # Mask this area to keep only the sighof view
-    p <- sf::st_polygon(list(rbind(sf::st_coordinates(start), sf::st_coordinates(ends), sf::st_coordinates(start))))
-    p <- sf::st_sfc(p)
-    p <- sf::st_buffer(p, 2)
-    p <- terra::vect(p)
-    terra::crs(p) <- terra::crs(aoi)
-    aoi <- terra::mask(aoi, p)
-
-    if (debug)
-    {
-      plot(aoi, col = viridis::inferno(50), range = c(0,1))
-      plot(start,add =T, col = "red", pch = 19)
-      plot(ends$geometry,add =T, col = "red", pch = 19, cex = 0.3)
-    }
-
-    # Compute the transition matrix for this AOI
-    trans <- transition(aoi, geocorrection = TRUE)
-
-    # Check if some point of the sighline fall outside of the AOI
-    # If any we reached the edge of the loaded part of the map. We need to load another part ahead.
-    if (has_na_in_sightline(aoi, ends))
-    {
-      # Make a newly sub aoi conductivity raster further ahead
-      line <- sf::st_cast(c(p1, p2), "LINESTRING") |> sf::st_sfc()
-      line <- sf::st_set_crs(line, sf::st_crs(seed))
-
-      sub_aoi_conductivity <- query_conductivity_aoi(conductivity, line, smooth = T)
-      sub_aoi_conductivity[sub_aoi_conductivity < th_conductivity] = th_conductivity
-      n = n+1
-
-      if (debug)
-      {
-        terra::plot(conductivity, col = viridis::inferno(50))
-        terra::plot(terra::ext(sub_aoi_conductivity), border = "red", add = T)
-        plot(seed, add = T, lwd = 3, col = "red")
-      }
-
-      sub_aoi_conductivity <- mask_existing_network(sub_aoi_conductivity, network, mask_value, buffer)
-      sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, trace, 0, 5, sf::st_crs(seed))
-
-      if (!is.null(find_seek_mask))
-        sub_aoi_conductivity = terra::mask(sub_aoi_conductivity, find_seek_mask, inverse = TRUE, updatevalue = th_conductivity)
-
-      # Check again if some ends fall outside of the newly cropped conductivity raster
-      # If yes we are close to the edge of the raster. Try again with half the sightline
-      if (has_na_in_sightline(sub_aoi_conductivity, ends))
-      {
-        tmp_angles_rad <- generate_angles(resolution, sightline/2, fov)
-        ends <- generate_ends(p2, tmp_angles_rad, sightline/2, heading)
-        ends$angle <- tmp_angles_rad
-      }
-
-      # If we still have NAs we reached the border of the conductivity map. We are done.
-      if (has_na_in_sightline(sub_aoi_conductivity, ends))
-      {
-        #message("Drive stopped early. Edge of conductivity raster has been reached.")
-        cost_max <- -Inf
+      if (driver$is_on_edge())
         break
-      }
-
-      # Re-extract the AOI and recompute the transition
-      aoi <- terra::crop(sub_aoi_conductivity, search_zone)
-      trans <- transition(aoi, geocorrection = TRUE)
     }
 
-    # Estimates the cost to reach each end points of the sighline and returns the main direction and
-    # other possible directions (i.e. intersections)
-    ans <- find_reachable(start, ends, trans, cost_max)
+    # We are not on an edge we can compute the costs
+    driver$compute_cost()
 
-    # The only way to get infinite values is to reach an existing road
-    # We need to reduce the sightline to reduce down the approach speed and connect accurately
-    j = 0
-    while (any_infinite_cost(ans$cost) & sightline/(2^j) > sightline_min)
+    # If there is no path it means no point was reachable
+    if (!driver$has_path())
     {
-      j = j+1
-      tmp_angles_rad <- generate_angles(resolution, sightline/(2^j), min(fov, 90))
-      ends <- generate_ends(p2, tmp_angles_rad, sightline/(2^j), heading)
-      ends$angle <- tmp_angles_rad
-      ans <- find_reachable(start, ends, trans, cost_max/(2^j))
-    }
-
-    if (is.null(ans))
-    {
-      warning("Driving stopped because not reachable point have been found", call. = FALSE)
-      cost_max = -Inf
       break
     }
 
-    # We reach a sightline limit but we still have 0s (and thus infinite cost).
-    # We need to connect the road
-    if (any_infinite_cost(ans$cost))
-    {
-      # No need to connect the roads it is to short (bug fix)
-      if(length(list_lines) <= 3) break
+    if (debug) driver$plot()
 
-      # Create a prolongation line
-      idx <- which.min(ans$cost)
-      angle <- heading + ends$angle[idx]
-      xstart <- sf::st_coordinates(start)[1]
-      ystart <- sf::st_coordinates(start)[2]
-      xend <- xstart+50*cos(angle)
-      yend <- ystart+50*sin(angle)
+    # We reached another road from the existing network
+    if (driver$has_reached_a_road())
+    {
+      driver$network_connection(network)
+      break
+    }
+
+    # Leave a trace of already seen roads and protect against infinite loops /!\
+    mapper$mask_trace(driver$get_seed())
+    if (driver$has_new_intersections())
+      mapper$mask_trace(driver$get_intersections())
+
+    if (disp)
+    {
+      bb = sf::st_buffer(driver$get_start(), 1.25*sightline, endCapStyle = "SQUARE") |> terra::vect()
+      plot(terra::crop(mapper$aoi, terra::ext(bb)), col = viridis::inferno(25))
+      driver$plot(add = T)
+    }
+
+    driver$move()
+  }
+
+  driver$print_speed(t0, done = TRUE)
+
+  return(driver$get_road())
+}
+
+# ==== MapMananer =====
+
+# We are working with large rasters not loaded in memory. We must load in memory some small part
+# iteratively wile driving. This object handle the logic of querying subsets in a larger map
+
+MapManager <- R6::R6Class("MapManager",
+cloneable = FALSE,
+public = list(
+  map = NULL,
+  aoi = NULL,
+  trace = NULL,
+  initialize = function(map, th_conductivity = 0.1, smooth = FALSE)
+  {
+    self$map = map
+    private$smooth = smooth
+    private$th_conductivity = th_conductivity
+    private$mask_value = 0
+    private$buffer = 10
+    self$set_search_seed_mode(FALSE)
+  },
+
+  query_aoi = function(seed)
+  {
+    resolution <- terra::res(self$map)[1]
+    ahead = 900
+    behind = 100
+    side = 400
+    smooth = TRUE
+
+    seed <- sf::st_simplify(seed, FALSE, dTolerance = 5)
+    private$seed <- seed
+
+    line <- seed |> st_extend_line(c(ahead, behind)) |>  sf::st_buffer(side, endCapStyle = "FLAT")
+    self$aoi <- terra::crop(self$map, terra::vect(line))
+
+    if (private$smooth)
+    {
+      w = matrix(1,3,3)
+      w[5] = 10
+      w = w/sum(w)
+      self$aoi  = terra::focal(self$aoi, w = w, fun = "mean")
+    }
+
+    self$aoi[is.na(self$aoi)] <- 0
+    self$aoi[self$aoi < private$th_conductivity] = private$th_conductivity
+  },
+
+  mask_network = function(network)
+  {
+    self$aoi <- mask_existing_network(self$aoi, network, private$mask_value, private$buffer)
+
+    if (private$seed_mode)
+    {
+      bb = sf::st_as_sfc(sf::st_bbox(self$aoi))
+      polygon = sf::st_cast(network, "POLYGON")
+      polygon = sf::st_difference(bb, polygon)
+      self$aoi = terra::mask(self$aoi, terra::vect(polygon), inverse = TRUE, updatevalue = private$th_conductivity)
+    }
+  },
+
+  mask_trace = function(trace)
+  {
+    #start_cut = 0
+    #end_cut = 5
+
+    #len = as.numeric(sf::st_length(trace))
+    #from = 1 - (len-start_cut)/len
+    #to = (len-end_cut)/len
+    #if (length(from) > 1)
+    #{
+    #  from = mean(from)
+    #  to = mean(to)
+    #}
+
+    if (methods::is(trace, "sfg")) trace <- sf::st_sfc(trace)
+    #mask <- lwgeom::st_linesubstring(trace, from, to)
+    mask <- sf::st_buffer(trace, dist = private$buffer, endCapStyle = "FLAT")
+    mask <- sf::st_set_crs(mask,  sf::st_crs(private$seed))
+    self$aoi <- terra::mask(self$aoi, terra::vect(mask), inverse = TRUE, updatevalue = 0.001)
+  },
+
+  set_search_seed_mode = function(val)
+  {
+    if (isTRUE(val))
+    {
+      private$mask_value = 2
+      private$buffer = 2
+      private$seed_mode = TRUE
+      private$smooth = FALSE
+    }
+    else
+    {
+      private$mask_value = 0
+      private$buffer = 10
+      private$seed_mode = FALSE
+    }
+  },
+
+  plot = function(aoi = FALSE)
+  {
+    if (isFALSE(aoi))
+    {
+      terra::plot(self$map, col = viridis::inferno(50))
+      terra::plot(terra::ext(self$aoi), col = "red", add = T, alpha = 0.3)
+      plot(private$seed, add = T, lwd = 3, col = "blue")
+    }
+    else
+    {
+      terra::plot(self$aoi, col = viridis::inferno(50))
+    }
+  }
+),
+private = list(
+  smooth = NULL,
+  th_conductivity = NULL,
+  mask_value = NULL,
+  seed = NULL,
+  buffer = NULL,
+  seed_mode = NULL)
+)
+
+# ==== Driving Agent ====
+
+DrivingAgent <- R6::R6Class("DrivingAgent",
+cloneable = FALSE,
+private = list(
+  sightline = NULL,          # Sightline of the driving agent input by the user
+  current_sightline = NULL,  # The sightline maybe reduced locally. We use current_sightline and sightline hold the original input
+  resolution = NULL,         # Resolution of the map on which we are suppose to drive
+  rcost = NULL,              # Relative cost compared to the maximal allowed value (which is not necessarily cost_max)
+  cost_max = NULL,           # Maximal cost allowed (user input). This value may be locally changed.
+  fov = NULL,                # Field of view (in degrees) of the driving agent
+  angle = NULL,              # The angle of the 0 degree for the field of view
+  map = NULL,                # [SpatRaster] on which the driving agent drives on step
+  trans = NULL,              # [TransitionMatrix] the transition matrix associated with map
+  start = NULL,              # [sfc] the position of the driving agent
+  ends = NULL,               # [sfc] the potentially reachable points
+  p1 = NULL,                 # [sfc] The first point of the seed used to compute the angle
+  p2 = NULL,                 # [sfc] The second point of the seed used to compute the angle (same than start actually)
+  k = NULL,                  # A counter of move
+  cost_profile = NULL,       # [vect] The angle-cost profile
+  cost_peaks = NULL,         # [data.frame] The location of the peaks in the cost profile
+  lcp = NULL,                # [sfc] line of the least cost path
+  intersections = NULL,      # [sfc] lines of the intersection seeds founds
+  novercost = NULL,          # Number of time we moved forward despite a cost higher than the maximum allowed cost
+  dovercost = NULL,          # Distance travelled  despite a cost higher than the maximum allowed cost
+  list_lines = NULL,         # [list<sfg>] list of sfg linestring of each step driven
+  list_intersections = NULL, # [list<sfg>] list of sfg linestring of each intersection seed
+  crs = sf::NA_crs_,         # [crs]
+  sightline_min = 15,        # Miminum allowed sightline
+  pahead = 0.8,              # When moving forward we do not move of 100% of the sightline but rather 80% (this prevent missing intersection)
+  partial_gap_size = 2.5
+),
+
+public = list(
+  initialize = function(sightline = 100, fov = 160, start = c(0,0), resolution = 2, min_conductivity = 0.6, crs = sf::NA_crs_)
+  {
+    private$sightline <- sightline
+    private$fov <- fov
+    private$start <- start
+    private$angle <- 0
+    private$resolution <- resolution
+    private$cost_max <- sightline * 1/min_conductivity
+    private$current_sightline  <- sightline
+    private$k <- 2L
+    private$novercost = 0L
+    private$dovercost = 0
+    private$list_lines <- list()
+    private$list_intersections <- list()
+  },
+
+  query_sightview = function(val)
+  {
+    bb <- sf::st_bbox(c(private$start, sf::st_geometry(private$ends)))
+    bb <- terra::ext(bb) + 10
+    aoi <- terra::crop(val, bb)
+
+    p <- sf::st_polygon(list(rbind(sf::st_coordinates(private$start), sf::st_coordinates(private$ends), sf::st_coordinates(private$start))))
+    p <- sf::st_sfc(p)
+    p <- sf::st_buffer(p, 2)
+    p <- terra::vect(p)
+    terra::crs(p) <- terra::crs(val)
+
+    private$map <- terra::mask(aoi, p)
+    private$trans <- transition(private$map, geocorrection = TRUE)
+  },
+
+  get_novercost = function()
+  {
+    return(private$novercost)
+  },
+
+  set_start = function(val)
+  {
+    private$start <- val
+
+    angles_rad = generate_angles(private$resolution, private$current_sightline,  private$fov)
+    private$ends <- generate_ends(private$p2, angles_rad, private$current_sightline, private$angle)
+    private$ends$angle <- angles_rad
+  },
+
+  get_start = function()
+  {
+    return(private$start)
+  },
+
+  set_seed = function(line)
+  {
+    if (is.na(private$crs))
+      private$crs <- sf::st_crs(line)
+
+    if (length(private$list_lines) == 0)
+      private$list_lines[[1]] = sf::st_geometry(line)[[1]]
+
+    l  <- lwgeom::st_linesubstring(line, 0.5, 1)
+    p1 <- lwgeom::st_startpoint(l)
+    p2 <- lwgeom::st_endpoint(l)
+
+    private$p1 = p1
+    private$p2 = p2
+
+    from <- sf::st_coordinates(p1)
+    to   <- sf::st_coordinates(p2)
+    M <- rbind(from, to)
+    Ax <- M[2,1]
+    Ay <- M[2,2]
+    Bx <- M[1,1]
+    By <- M[1,2]
+
+    private$angle <- atan2(Ay-By, Ax-Bx)
+    self$set_start(p2)
+  },
+
+  get_seed = function()
+  {
+    n = length(private$list_lines)
+    return(private$list_lines[[n]])
+  },
+
+  set_fov = function(val)
+  {
+    private$fov <- val
+  },
+
+  set_sightline = function(val)
+  {
+    private$current_sightline <- val
+    private$set_sighline <- val
+  },
+
+  get_intersections = function()
+  {
+    return(private$intersections)
+  },
+
+  get_road = function()
+  {
+    roads <- private$list_lines
+    roads <- roads[1:(length(roads) - private$novercost)]
+    first = private$list_lines[[1]]
+    roads <- lapply(roads, function(x) { x <- x[] ; return(x[-1,])})
+    roads[[1]] = first
+
+    newline <- do.call(rbind, roads) |>
+      sf::st_linestring() |>
+      sf::st_sfc() |>
+      sf::st_set_crs(private$crs)
+
+    intersections <- NULL
+    if (length(private$list_intersections) >= 1)
+    {
+      intersections <- do.call(c, private$list_intersections)
+      intersections <- sf::st_set_crs(intersections, private$crs)
+
+      p = lwgeom::st_startpoint(intersections)
+      d = as.numeric(sf::st_distance(p, newline))
+      intersections <- intersections[d < 1]
+    }
+
+
+    return(list(road = newline, seeds = intersections))
+  },
+
+  get_trace = function()
+  {
+    u = self$get_road()
+    road = u$road
+    seed = u$seeds
+    return(c(road, seed))
+  },
+
+  has_new_intersections = function()
+  {
+    return(!is.null(private$intersections))
+  },
+
+  has_path = function()
+  {
+    return(!is.null(self$least_cost_path()))
+  },
+
+  network_connection = function(network)
+  {
+    # Create a prolongation line
+    angle <- private$angle
+    xstart <- sf::st_coordinates(private$start)[1]
+    ystart <- sf::st_coordinates(private$start)[2]
+    xend <- xstart+50*cos(angle)
+    yend <- ystart+50*sin(angle)
+    m = matrix(c(xstart, xend, ystart, yend), ncol = 2)
+    prolongation <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
+
+    # Intersection between the prolongation and the existing network
+    p = sf::st_intersection(prolongation, network)
+
+    # No intersection: double the length of the prolongation
+    if (length(p) == 0)
+    {
+      xend <- xstart+100*cos(angle)
+      yend <- ystart+100*sin(angle)
       m = matrix(c(xstart, xend, ystart, yend), ncol = 2)
       prolongation <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
 
       # Intersection between the prolongation and the existing network
       p = sf::st_intersection(prolongation, network)
-
-      # No intersection: double the length of the prolongation
-      if (length(p) == 0)
-      {
-        xend <- xstart+100*cos(angle)
-        yend <- ystart+100*sin(angle)
-        m = matrix(c(xstart, xend, ystart, yend), ncol = 2)
-        prolongation <- sf::st_sfc(sf::st_linestring(m), crs = sf::st_crs(network))
-
-        # Intersection between the prolongation and the existing network
-        p = sf::st_intersection(prolongation, network)
-      }
-
-      # Still no intersection we may be in the wrong direction e.g. if we are trying to
-      # connect to a parallel line we have 0 tolerance. Connect to the NN
-      if (length(p) == 0)
-      {
-        bbb = sf::st_buffer(start, dist = 50)
-        sf::st_crs(start) = sf::st_crs(network)
-        sf::st_crs(bbb) = sf::st_crs(network)
-        subnet = sf::st_intersection(network, bbb)
-        prolongation = sf::st_nearest_points(start, subnet)
-        p = lwgeom::st_endpoint(prolongation)
-      }
-
-      if (length(p) > 1)
-      {
-        p = p[1]
-        warning("Connection problem. More than one line intersection")
-      }
-
-      # Round the coordinates to an existing node of the network
-      idx = terra::cellFromXY(conductivity, sf::st_coordinates(p))
-      p = terra::xyFromCell(conductivity, idx)
-      prolongation = sf::st_coordinates(prolongation)[,1:2]
-      prolongation[2,] = p
-
-      # Add the prolongation to the list of segment
-      L <- sf::st_sfc(sf::st_linestring(prolongation), crs = sf::st_crs(network))
-      list_lines[[k]] = L[[1]]
-
-      if (disp)
-      {
-        terra::plot(terra::crop(sub_aoi_conductivity, terra::ext(aoi) + 80),
-                    col = viridis::inferno(50),
-                    main = paste0(k,"/", n),
-                    range = c(0,1),
-                    axes = FALSE)
-        terra::plot(aoi, add = T, col = viridis::inferno(50))
-        terra::plot(terra::ext(aoi), add = T)
-        plot(start, add = T, col ="red", pch = 19)
-        plot(network, add = T, col = "green")
-        plot(L, add = T, col = "red")
-        plot(lwgeom::st_endpoint(L), add = T, col = "green", pch = 19)
-      }
-
-      message("Driving stopped because it reached another road. Roads were connected together.")
-      cost_max = -Inf
-      novercost = 0
-      dovercost = 0
-      break
     }
+
+    if (length(p) > 1)
+    {
+      p = p[1]
+      warning("Connection problem. More than one line intersection")
+    }
+
+    # Still no intersection we may be in the wrong direction e.g. if we are trying to
+    # connect to a parallel line and we have 0 tolerance. Connect to the NN
+    if (length(p) == 0)
+    {
+      bbb = sf::st_buffer(private$start, dist = 50)
+      sf::st_crs(private$start) = sf::st_crs(network)
+      sf::st_crs(bbb) = sf::st_crs(network)
+      subnet = sf::st_intersection(network, bbb)
+      prolongation = sf::st_nearest_points(private$start, subnet)
+    }
+    # we have a connection but we must round the value to match a node of the line
+    else
+    {
+      bbb = sf::st_buffer(p, dist = 5)
+      sf::st_crs(p) = sf::st_crs(network)
+      sf::st_crs(bbb) = sf::st_crs(network)
+      subnet = sf::st_intersection(network, bbb)
+      subnet = sf::st_cast(subnet, "POINT")
+      i = sf::st_nearest_feature(p, subnet)
+      p = subnet[i]
+      prolongation = sf::st_coordinates(prolongation)[,1:2]
+      prolongation[2,] = sf::st_coordinates(p)
+      prolongation = sf::st_sfc(sf::st_linestring(prolongation), crs = sf::st_crs(network))
+    }
+
+    private$novercost = 0L
+    private$dovercost = 0
+
+    private$list_lines[[private$k]] = prolongation[[1]]
+  },
+
+  least_cost_path = function()
+  {
+    return(private$lcp)
+  },
+
+  has_reached_a_road = function()
+  {
+    any_infinite_cost(private$cost_profile)
+  },
+
+  divide_sightline = function(div = 2)
+  {
+    private$current_sightline <- private$current_sightline/2
+    angles_rad <- generate_angles(private$resolution, private$current_sightline, private$fov)
+    private$ends <- generate_ends(private$p2, angles_rad, private$current_sightline, private$angle)
+    private$ends$angle <- angles_rad
+    self$query_sightview(private$map)
+  },
+
+  is_on_edge = function()
+  {
+    val <- terra::extract(private$map, sf::st_coordinates(private$ends))[[1]]
+    return(any(is.na(val)))
+  },
+
+  move = function()
+  {
+    private$k = private$k+1
+    private$current_sightline = private$sightline
+    private$cost_profile = NULL
+    private$cost_peaks = NULL
+    private$intersections = NULL
+
+    self$set_seed(private$lcp)
+
+    private$lcp = NULL
+  },
+
+  reached_end = function()
+  {
+    if (is.infinite(private$cost_max))
+      return(TRUE)
+
+    # @param partial_gap_size numeric. The algorithm can drive on low conductivity segments even if the
+    # conductivity is too low and should trigger a stop signal if it looks like a sharp line and an
+    # high conductivity road is reach after the gap (see references). The allowed distance is a multiple
+    # of the sightline. Default is 2.5 which roughly means that it can follow a too low conductivity
+    # track for two iterations and at the third one it must be back on a high conductivity track.
+    if (private$dovercost > private$partial_gap_size*private$sightline)
+      return(TRUE)
+
+    return(FALSE)
+  },
+
+  compute_cost = function()
+  {
+    ans <- find_reachable(private$start, private$ends, private$trans, private$cost_max)
+
+    if (is.null(ans)) return(NULL)
+
+    # The only way to get infinite values is to reach an existing road
+    # We need to reduce the sightline to reduce down the approach speed and connect accurately
+    current_cost = private$cost_max
+    while (any_infinite_cost(ans$cost) & private$current_sightline > private$sightline_min)
+    {
+      self$divide_sightline()
+      current_cost = current_cost/2
+      ans <- find_reachable(private$start, private$ends, private$trans, current_cost)
+    }
+
+    private$cost_profile = ans$cost
+    private$cost_peaks = ans$minima
 
     # We now have the cost to reach each point of the sightline and the peaks in the cost
     # profile indicating which point we must reach
-    cost <- ans$cost
+    cost <- private$cost_profile
 
     # The main direction
-    idx_main <- ans$minima$idx[1]
-    depth_main = ans$minima$depth[1]
-    current_cost <- ans$minima$rcost[1]
-    end <- ends[idx_main,]
+    idx_main <- private$cost_peaks$idx[1]
+    depth_main = private$cost_peaks$depth[1]
+    end <- private$ends[idx_main,]
+
+    # Compute the shortest path between the starting points and the valid end points
+    L <- gdistance::shortestPath(private$trans, sf::st_coordinates(private$start), sf::st_coordinates(end), output = "SpatialLines")
+    L <- sf::st_geometry(sf::st_as_sf(L))
+    C <- sf::st_coordinates(L)
+    C <- C[1:(nrow(C)*private$pahead),-3]
+    L <- sf::st_sfc(sf::st_linestring(C))
+    private$lcp <- L
+    private$list_lines[[private$k]] <- L[[1]]
 
     # The other direction
-    idx_other <- ans$minima$idx[-1]
-    releative_cost <- ans$minima$rcost
-    ends_other <- ends[idx_other,]
-    cost_other <- ans$minima$rcost[-1]
+    idx_other <- private$cost_peaks$idx[-1]
+    private$rcost <- private$cost_peaks$rcost[1]
+    ends_other <- private$ends[idx_other,]
+    cost_other <- private$cost_peaks$rcost[-1]
 
     # Check the angle between the main road and the other road. If the angle is < 15 degrees there
     # are false positive.
     # (This is probably not useful anymore but was need to fix bugs when using very poor map)
     delta_angle = abs(end$angle - ends_other$angle)*180/pi
-    ends_other = ends_other[delta_angle > 15,]
-    cost_other = cost_other[delta_angle > 15]
-
-    # Compute the shortest path between the starting points and the valid end points and c
-    L <- gdistance::shortestPath(trans, sf::st_coordinates(start), sf::st_coordinates(end), output = "SpatialLines")
-    L <- sf::st_geometry(sf::st_as_sf(L))
-    C <- sf::st_coordinates(L)
-    C <- C[1:(nrow(C)*pahead),-3]
-    L <- sf::st_sfc(sf::st_linestring(C))
-    list_lines[[k]] <- L[[1]]
-
-    # Leave a trace of already seen roads and protect against infinite loops /!\
-    trace <- st_join_linestring(trace, L)
-    sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, trace, 0, 5, sf::st_crs(seed))
-
-    # If the current cost is > 1 it means that we drove on a track that is partially or totally
-    # not labelled as road. We record this state
-    if (current_cost > 1)
-    {
-      novercost = novercost + 1
-      dovercost = dovercost + sightline
-      overcost = overcost + (current_cost - cost_max)
-    }
-    else
-    {
-      novercost = 0
-      dovercost = 0
-      overcost = 0
-    }
+    ends_other  = ends_other[delta_angle > 15,]
+    cost_other  = cost_other[delta_angle > 15]
 
     # Now we are processing the intersection founds (if any)
     I <- NULL
     if (length(sf::st_geometry(ends_other)) > 0)
     {
-      I <- gdistance::shortestPath(trans, sf::st_coordinates(start), sf::st_coordinates(ends_other), output = "SpatialLines") |> suppressWarnings()
+      I <- gdistance::shortestPath(private$trans, sf::st_coordinates(private$start), sf::st_coordinates(ends_other), output = "SpatialLines") |> suppressWarnings()
       I <- sf::st_geometry(sf::st_as_sf(I))
       I <- sf::st_difference(I,L)
 
@@ -420,162 +646,122 @@ track_line <- function(seed,
         return(TRUE)
       }, I)
 
-      if (length(I) > 0)
-      {
-        list_intersections <- c(list_intersections, list(I))
-        sub_aoi_conductivity <- mask_passage(sub_aoi_conductivity, I, 5, 0, sf::st_crs(seed))
-      }
+      private$intersections <- I
+      private$list_intersections <- c(private$list_intersections, list(I))
     }
 
-    # We finished the iteration k. Increment the counter
-    k <- k + 1
-
-    if (disp)
+    # If the current cost is > 1 it means that we drove on a track that is partially or totally
+    # not labelled as road. We record this state
+    if (private$rcost > 1)
     {
-      end <- lwgeom::st_endpoint(L)
-
-      if (length(angles_rad) == length(cost))
-      {
-        #svglite::svglite("/home/jr/Documents/Ulaval/2022 Post-doc/Articles/vectnet/img/svg/followroadcostprofile.svg", height = 8, width = 8)
-        graphics::par(family = "serif")
-        plot(angles_rad*180/pi, cost, type = "l", lwd = 2, ylim = c(sightline, max(cost) *1.1), col = "red", xlab = "Angle (\u00B0)", ylab = "Cost (1)")
-        smooth <- 9
-        scost = ma(cost, n = smooth)
-        scost = ma(scost, n = 5)
-        graphics::lines(angles_rad*180/pi, scost, col = "darkgreen", lwd = 2)
-        graphics::abline(v = angles_rad[c(idx_main, idx_other)]*180/pi, col = "black",lwd = 2)
-        graphics::abline(h = cost_max, lty = 3)
-        graphics::abline(h = 2.5*cost_max, lty = 3)
-        graphics::legend(80, 990, legend=c("Cost profile", "Smoothed profile"),
-               col=c("red", "darkgreen"), lty=1:2, cex=0.8)
-        #abline(v = angles_rad[idx_main]*180/pi + c(-0.2612, 0.2612)*180/pi, lty = 3)
-        #dev.off()
-      }
-      terra::plot(terra::crop(sub_aoi_conductivity, terra::ext(aoi) + 80),
-                  col = viridis::inferno(50),
-                  main = paste0(k,"/", n),
-                  range = c(0,1),
-                  axes = FALSE)
-      terra::plot(aoi, add = T, col = viridis::inferno(50))
-      terra::plot(terra::ext(aoi), add = T)
-      ends$cost = cost
-      tryCatch({
-        plot(ends["cost"], pal = viridis::viridis, pch = 19, add = T, cex = 0.25, breaks = "quantile")
-      }, error = function(x) {
-        plot(ends$geometry, col = "red", add = T, pch = 19, cex = 0.5)
-      })
-
-      tryCatch({
-        paths = gdistance::shortestPath(trans, sf::st_coordinates(start), sf::st_coordinates(ends), output = "SpatialLines") |> suppressWarnings()
-        paths = sf::st_as_sf(paths)
-        paths$cost = ends$cost
-        plot(paths, add = T,  pal = viridis::viridis)
-        plot(p1, col = "red", pch = 19, add = T)
-        plot(p2, col = "red", pch = 19, add = T)
-      }, error = function(x) print(x))
-
-      plot(L, add = T, col = "red", lwd = 4)
-      if(!is.null(I)) plot(I, add = T, col = "blue", lwd = 3)
-      #if(!is.null(I2)) plot(I2, add = T, col = "cornflowerblue", lwd = 3)
-      plot(end, add = T, col = "green", pch = 19, cex = 2)
-      cat("step = ", k-1, "=====\n")
-      cat("cost =", current_cost, " | ")
-      cat("overcost =", overcost, " | ")
-      cat("dovercost =", dovercost, "\n\n")
-
-      In = I
-      #tm = paper_figure()
+      private$novercost = private$novercost + 1L
+      private$dovercost = private$dovercost + private$current_sightline
     }
-  }
+    else
+    {
+      private$novercost = 0L
+      private$dovercost = 0
+    }
+  },
 
-list_lines <- list_lines[1:(length(list_lines)-novercost)]
-  first = list_lines[[1]]
-  list_lines <- lapply(list_lines, function(x) { x <- x[] ; return(x[-1,])})
-  list_lines[[1]] = first
-
-  newline <- do.call(rbind, list_lines) |>
-    sf::st_linestring() |>
-    sf::st_sfc() |>
-    sf::st_set_crs(sf::st_crs(seed))
-
-
-  if (length(list_intersections) >= 1)
+  plot = function(add = FALSE)
   {
-    intersections <- do.call(c, list_intersections) |>
-      sf::st_set_crs(sf::st_crs(seed))
+    # Plot the background map
+    if (!is.null(private$map))
+    {
+      terra::plot(private$map, col = viridis::inferno(50), range = c(0,1), add = add)
+      add = TRUE
+    }
 
-    p = lwgeom::st_startpoint(intersections)
-    d = as.numeric(sf::st_distance(p,newline))
-    intersections <- intersections[d < 1]
-  }
-  else
+    # If we already computed the lcp, then recompute all the possible paths (they were not recorded)
+    # (For display only)
+    if (!is.null(private$lcp))
+    {
+      tryCatch(
+      {
+        paths = gdistance::shortestPath(private$trans, sf::st_coordinates(private$start), sf::st_coordinates(private$ends), output = "SpatialLines") |> suppressWarnings()
+        paths = sf::st_as_sf(paths)
+        paths$cost = private$cost_profile
+        plot(paths["cost"], add = add, pal = viridis::viridis, breaks = "quantile")
+      },
+      error = function(x) print(x))
+
+      end <- lwgeom::st_endpoint(private$lcp)
+      plot(private$lcp, add = T, col = "red", lwd = 4)
+      plot(end, add = add, col = "green", pch = 19, cex = 2)
+
+      graphics::title(paste0("rcost: ", round(private$rcost,2), " | radius: ", private$current_sightline, "\n k: ", private$k, " | nover: ", private$novercost, " (+", private$dovercost, "m)"))
+    }
+
+    # Plot the intersection
+    if (!is.null(private$intersections))
+    {
+      plot(private$intersections, add = add, col = "blue", lwd = 3)
+      add = TRUE
+    }
+
+
+    if (!is.null(private$ends))
+    {
+      if (is.null(private$cost_profile))
+      {
+        plot(private$ends$geometry, add = add, col = "red", pch = 19, cex = 0.3)
+      }
+      else
+      {
+        geom = private$ends
+        geom$cost = private$cost_profile
+        plot(geom["cost"], add = add, pal = viridis::viridis, pch = 19, cex = 0.25, breaks = "quantile")
+      }
+
+      add = TRUE
+    }
+
+    if (!is.null(private$start))
+    {
+      plot(private$start, add = add, col = "red", pch = 19)
+      add = TRUE
+    }
+
+    if (!is.null(private$p1))
+    {
+      plot(private$p1, add = add, col = "blue", pch = 19)
+      add = TRUE
+    }
+  },
+
+  print_speed = function(t0, done = FALSE)
   {
-    intersections <- NULL
-  }
+    if (isFALSE(done))
+    {
+      if (private$k %% 5 == 0)
+      {
+        dist = (private$k-1)*private$sightline*private$pahead
+        cat(dist, " m (", get_speed(dist, t0), " km/h)\r", sep = "")
+        utils::flush.console()
+      }
+    }
+    else
+    {
+      h <- km <- NULL
+      tf <- Sys.time()
+      dt <- tf-t0
+      dt <- round(units::as_units(dt),1)
+      dist <- sf::st_length(self$get_road()$road)
+      hdt = dt
+      units(hdt) <- units::make_units(h)
+      units(dist) <- units::make_units(km)
+      dist = round(dist, 2)
+      speed = round(dist/hdt)
+      cat("Processed ended in", dt, units::deparse_unit(dt),
+          ": road of", dist, units::deparse_unit(dist),
+          "driven at", speed, units::deparse_unit(speed),
+          "\n")
+    }
+  })
+)
 
-
-  nintersection <- length(intersections)
-  len = as.numeric(sf::st_length(newline))
-  dintersection = nintersection/(len/1000)
-
-  h <- km <- NULL
-  tf <- Sys.time()
-  dt <- tf-t0
-  dt <- round(units::as_units(dt),1)
-  dist <- sf::st_length(newline)
-  hdt = dt
-  units(hdt) <- units::make_units(h)
-  units(dist) <- units::make_units(km)
-  dist = round(dist, 2)
-  speed = round(dist/hdt)
-  cat("Processed ended in", dt, units::deparse_unit(dt),
-      ": road of", dist, units::deparse_unit(dist),
-      "driven at", speed, units::deparse_unit(speed),
-      "\n")
-
-  return(list(road = newline, seeds = intersections, dintersection = dintersection))
-}
-
-get_heading <- function(from, to)
-{
-  from <- sf::st_coordinates(from)
-  to   <- sf::st_coordinates(to)
-  M <- rbind(from, to)
-  Ax <- M[2,1]
-  Ay <- M[2,2]
-  Bx <- M[1,1]
-  By <- M[1,2]
-  heading <- atan2(Ay-By, Ax-Bx)
-}
-
-query_conductivity_aoi <- function(conductivity, seed, smooth = TRUE)
-{
-  resolution <- terra::res(conductivity)[1]
-
-  buf_dist <- c("ahead" = 900, "behind" = 100, "side" = 400)  # Could be set as a parameter
-
-  aoi <- seed |>
-    st_extend_line(c(buf_dist["ahead"], buf_dist["behind"])) |>
-    sf::st_buffer(buf_dist["side"], endCapStyle = "FLAT")
-  #plot(aoi, add = T, col= "red")
-  #plot(seed, add = T, lwd = 3)
-
-  conductivity_crop <- terra::crop(conductivity, terra::vect(aoi))
-  #plot(conductivity_crop, col = viridis::inferno(50))
-  #plot(seed, add = T, lwd = 3, col = "red")
-
-  if (smooth)
-  {
-    w = matrix(1,3,3)
-    w[5] = 10
-    w = w/sum(w)
-    conductivity_crop = terra::focal(conductivity_crop, w = w, fun = "mean")
-  }
-
-  conductivity_crop[is.na(conductivity_crop)] <- 0
-
-  return(conductivity_crop)
-}
+# ==== Tools ====
 
 generate_angles <- function(resolution, sightline, fov)
 {
@@ -604,7 +790,7 @@ find_reachable <- function(start, ends, trans, cost_max)
 
   if (all(is.infinite(cost))) return(NULL)
 
-  cost[is.infinite(cost)] <- max(9999, max(cost[!is.infinite(cost)]))
+  cost[is.infinite(cost)] <- max(99999, max(cost[!is.infinite(cost)]))
 
   # Select local minima of cost
   if (length(cost) > 36)
@@ -689,24 +875,6 @@ mask_existing_network <- function(x, network, updatevalue = 0, buffer = 10)
   return(x)
 }
 
-mask_passage <- function(raster, lines, start_cut, end_cut, crs)
-{
-  len = as.numeric(sf::st_length(lines))
-  from = 1 - (len-start_cut)/len
-  to = (len-end_cut)/len
-  if (length(from) > 1)
-  {
-    from = mean(from)
-    to = mean(to)
-  }
-  if (methods::is(lines, "sfg")) lines <- sf::st_sfc(lines)
-  mask <- lwgeom::st_linesubstring(lines, from, to)
-  mask <- sf::st_buffer(mask, dist = 8, endCapStyle = "FLAT")
-  mask <- sf::st_set_crs(mask, crs)
-  raster <- terra::mask(raster, terra::vect(mask), inverse = TRUE, updatevalue = 0.05)
-  return(raster)
-}
-
 get_speed = function(dist, t0)
 {
   h <- m <- km <- NULL
@@ -731,7 +899,7 @@ has_na_in_sightline = function(map, ends)
 
 any_infinite_cost = function(cost)
 {
-  return(any(cost >= 9999))
+  return(any(cost >= 99999))
 }
 
 
@@ -769,4 +937,25 @@ any_infinite_cost = function(cost)
 #   }
 #
 #   tm
+# }
+
+
+
+# if (length(angles_rad) == length(cost))
+# {
+#
+#   #svglite::svglite("/home/jr/Documents/Ulaval/2022 Post-doc/Articles/vectnet/img/svg/followroadcostprofile.svg", height = 8, width = 8)
+#   graphics::par(family = "serif")
+#   plot(angles_rad*180/pi, cost, type = "l", lwd = 2, ylim = c(sightline, max(cost) *1.1), col = "red", xlab = "Angle (\u00B0)", ylab = "Cost (1)")
+#   smooth <- 9
+#   scost = ma(cost, n = smooth)
+#   scost = ma(scost, n = 5)
+#   graphics::lines(angles_rad*180/pi, scost, col = "darkgreen", lwd = 2)
+#   graphics::abline(v = angles_rad[c(idx_main, idx_other)]*180/pi, col = "black",lwd = 2)
+#   graphics::abline(h = cost_max, lty = 3)
+#   graphics::abline(h = 2.5*cost_max, lty = 3)
+#   graphics::legend(80, 990, legend=c("Cost profile", "Smoothed profile"),
+#          col=c("red", "darkgreen"), lty=1:2, cex=0.8)
+#   #abline(v = angles_rad[idx_main]*180/pi + c(-0.2612, 0.2612)*180/pi, lty = 3)
+#   #dev.off()
 # }

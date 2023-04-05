@@ -87,6 +87,8 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
            "#00FF66", "#00FFCC", "#0066FF","#6600FF",
            "#CC00FF", "#FF0066")
 
+  t0 <- Sys.time()
+
   seeds = sf::st_geometry(seeds)
 
   if (display)
@@ -183,6 +185,16 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
   if (smooth)
     network = smooth_network(network)
 
+  km <- NULL
+  tf = Sys.time()
+  d = sum(sf::st_length(network))
+  units(d) <- units::make_units(km)
+  dt = tf-t0
+  dt = round(units::as_units(dt),1)
+  hdt = dt
+  units(hdt) <- units::make_units(h)
+  s = round(d/hdt)
+  cat(round(d, 0), " ", units::deparse_unit(d), " network vectorized in ", round(dt,1),  " ", units::deparse_unit(dt), " (", s, " ", units::deparse_unit(s), ")\n", sep = "")
   return(network)
 }
 

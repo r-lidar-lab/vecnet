@@ -22,7 +22,7 @@
 #' library(terra)
 #' library(sf)
 #'
-#' map <- system.file("extdata", "network.tif", package = "vecnet")
+#' map <- system.file("extdata", "network2.tif", package = "vecnet")
 #' map <- rast(map)
 #'
 #' seeds = init_seeds(map, min_conductivity = 0.8)
@@ -43,7 +43,7 @@ init_seeds = function(map, contour = sf::st_as_sfc(sf::st_bbox(map)), ...)
   seed = sf::st_sfc(seed)
   sf::st_crs(seed) <- sf::st_crs(map)
 
-  ans = track_line(seed, map, network, sightline = 50, find_seed_mode = polygon, ...)
+  ans = track_line(seed, map, network, sightline = 50, seed_mode = TRUE, ...)
 
   return(ans$seeds)
 }

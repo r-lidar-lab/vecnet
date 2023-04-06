@@ -88,7 +88,7 @@ smooth_line = function(points)
   spline[nrow(spline),1] = xend
   spline[nrow(spline),2] = yend
   spline <- sf::st_sfc(sf::st_linestring(spline))
-  sf::st_crs(spline) <- st_crs(points)
+  sf::st_crs(spline) <- sf::st_crs(points)
   spline = sf::st_simplify(spline, dTolerance = 1)
   return(spline)
 }

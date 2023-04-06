@@ -78,9 +78,9 @@ geocorrection = function(x)
   distance = (cell1-cell2)^2
   distance = sqrt(distance[,1] + distance[,2])
 
-  if(gdistance::matrixValues(x) == "conductance")
+  if (gdistance::matrixValues(x) == "conductance")
     correctionValues <- 1/distance
-  else if(gdistance::matrixValues(x) == "resistance")
+  else if (gdistance::matrixValues(x) == "resistance")
     correctionValues <- distance
   else
     stop("Internal error")
@@ -88,11 +88,11 @@ geocorrection = function(x)
   i <- as.integer(adj[,1] - 1)
   j <- as.integer(adj[,2] - 1)
   xv <- as.vector(correctionValues) #check for Inf values!
-  dims <- ncell(x)
-  correctionMatrix <- new("dgTMatrix", i = i, j = j, x = xv, Dim = as.integer(c(dims,dims)))
+  dims <- terra::ncell(x)
+  correctionMatrix <- methods::new("dgTMatrix", i = i, j = j, x = xv, Dim = as.integer(c(dims,dims)))
   correctionMatrix <- (methods::as(correctionMatrix,"sparseMatrix"))
 
-  if (is(gdistance::transitionMatrix(x), "dsCMatrix")) #isSymmetric?
+  if (methods::is(gdistance::transitionMatrix(x), "dsCMatrix")) #isSymmetric?
     correctionMatrix <- Matrix::forceSymmetric(correctionMatrix)
 
   transitionCorrected <- correctionMatrix * gdistance::transitionMatrix(x)

@@ -21,7 +21,8 @@ Imports:
     pracma,
     tidygraph,
     sf,
-    sfnetworks
+    sfnetworks,
+    R6
 Suggests:
     viridis
 RoxygenNote: 7.2.0

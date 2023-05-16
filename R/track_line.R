@@ -101,7 +101,6 @@ track_line <- function(seed,
     driver$print_speed(t0)
     driver$query_sightview(mapper$aoi)
 
-
     if (driver$is_on_edge())
     {
       # If the driving agent is on the edge of the loaded aoi we must load a new aoi ahead
@@ -190,6 +189,8 @@ public = list(
     smooth = TRUE
 
     seed <- sf::st_simplify(seed, FALSE, dTolerance = 5)
+    seed <- sf::st_sfc(seed)
+    sf::st_crs(seed) <- sf::st_crs(self$map)
     private$seed <- seed
 
     line <- seed |> st_extend_line(c(ahead, behind)) |>  sf::st_buffer(side, endCapStyle = "FLAT")
@@ -774,11 +775,14 @@ generate_angles <- function(resolution, sightline, fov)
 
 generate_ends <- function(center, angles, sightline, direction)
 {
+  crs <- sf::st_crs(center)
   center <- sf::st_coordinates(center)
   X <- center[1] + sightline * cos(direction + angles)
   Y <- center[2] + sightline * sin(direction + angles)
   M <- data.frame(X,Y)
-  sf::st_as_sf(M, coords = c("X", "Y"))
+  M <- sf::st_as_sf(M, coords = c("X", "Y"))
+  sf::st_crs(M) = crs
+  return(M)
 }
 
 find_reachable <- function(start, ends, trans, cost_max)

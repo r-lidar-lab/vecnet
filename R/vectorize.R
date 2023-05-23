@@ -107,7 +107,7 @@ vectorize_network = function(map, seeds, network = NULL, max_sinuosity = 1.8, mi
     for (i in seq_along(seeds))
     {
       tryCatch({
-        res <- track_line(seeds[i], map, network = network)#, ...)
+        res <- track_line(seeds[i], map, network = network, ...)
       },
       error = function(e) {
         seed = seeds[i]

@@ -122,7 +122,10 @@ track_line <- function(seed,
     }
 
     # We are not on an edge we can compute the costs
-    driver$compute_cost()
+    tryCatch({
+      driver$compute_cost()
+    },
+    error = function(e) { warning(paste0("Internal errror while computing the cost: stop driving the road. (", e, ")")); })
 
     # If there is no path it means no point was reachable
     if (!driver$has_path())
